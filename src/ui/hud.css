@@ -1,0 +1,347 @@
+/* NEON KAIDO — Cyberpunk-2077-style HUD, title and pause menu. Owned by the player workstream. */
+@font-face { font-family: 'NK Rajdhani'; src: url('/textures/player/fonts/rajdhani-500.woff2') format('woff2'); font-weight: 500; font-display: block; }
+@font-face { font-family: 'NK Rajdhani'; src: url('/textures/player/fonts/rajdhani-600.woff2') format('woff2'); font-weight: 600; font-display: block; }
+@font-face { font-family: 'NK Rajdhani'; src: url('/textures/player/fonts/rajdhani-700.woff2') format('woff2'); font-weight: 700; font-display: block; }
+@font-face { font-family: 'NK Chakra'; src: url('/textures/player/fonts/chakra-500.woff2') format('woff2'); font-weight: 500; font-display: block; }
+@font-face { font-family: 'NK Chakra'; src: url('/textures/player/fonts/chakra-700.woff2') format('woff2'); font-weight: 700; font-display: block; }
+@font-face { font-family: 'NK Mono'; src: url('/textures/player/fonts/sharetech.woff2') format('woff2'); font-weight: 400; font-display: block; }
+
+#nk {
+  --y: #fcee0a; --y2: #f7e94d; --r: #ff6158; --r2: #e5433c; --rd: #5c1418; --rdd: #1d0709;
+  --c: #5ef6ff; --c2: #19d8e8; --cd: #0b3b40; --w: #e9f6f7; --hp: #ff5a4e;
+  --jp: 'Yu Gothic UI', 'Yu Gothic', 'Meiryo', 'MS Gothic', sans-serif;
+  position: fixed; inset: 0; pointer-events: none; overflow: hidden;
+  font-family: 'NK Rajdhani', 'Rajdhani', 'Segoe UI', sans-serif; font-weight: 600; color: var(--r);
+  letter-spacing: .04em; text-transform: uppercase; user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+#nk * { box-sizing: border-box; }
+#nk .hud { text-shadow: 0 1px 3px rgba(0,0,0,.55); }
+#nk .mono { font-family: 'NK Mono', monospace; font-weight: 400; letter-spacing: .08em; }
+#nk .jp { font-family: var(--jp); font-weight: 700; letter-spacing: .1em; }
+#nk .hud { position: absolute; inset: 0; transition: opacity .5s; }
+#nk.hud-hidden .hud, #nk.state-title .hud, #nk.state-paused .hud .hud-fade { opacity: 0; }
+#nk.state-paused .hud { opacity: .25; }
+.hud .tiny { font-family: 'NK Mono', monospace; font-weight: 400; font-size: 10px; letter-spacing: .14em; color: rgba(255, 97, 88, .75); }
+
+/* ===================== STATUS (top-left) ===================== */
+.nk-status { position: absolute; left: 34px; top: 30px; width: 420px; }
+.nk-status .head { display: flex; gap: 10px; align-items: center; margin-bottom: 6px; }
+.nk-status .head .tiny:last-child { color: rgba(94, 246, 255, .55); }
+.nk-status .row { display: flex; align-items: center; gap: 10px; }
+.nk-level { position: relative; width: 40px; height: 40px; display: grid; place-items: center; font-family: 'NK Chakra'; font-weight: 700; font-size: 20px; color: var(--c);
+  background: linear-gradient(135deg, rgba(94,246,255,.18), rgba(94,246,255,.03)); clip-path: polygon(0 0, 100% 0, 100% 72%, 72% 100%, 0 100%);
+  box-shadow: inset 0 0 0 1px rgba(94,246,255,.6); text-shadow: 0 0 10px rgba(94,246,255,.8); }
+.nk-level::after { content: ''; position: absolute; right: 2px; bottom: 2px; width: 8px; height: 8px; background: var(--c); clip-path: polygon(100% 0, 100% 100%, 0 100%); }
+.nk-hp { flex: 1; }
+.nk-hp .bar { position: relative; height: 12px; background: rgba(60, 10, 12, .65); clip-path: polygon(0 0, 100% 0, calc(100% - 8px) 100%, 0 100%); }
+.nk-hp .bar .fill { position: absolute; inset: 0; width: 100%; background: linear-gradient(90deg, #ff3b36, var(--hp) 60%, #ff8b78); box-shadow: 0 0 14px rgba(255,90,78,.9); transform-origin: left; transition: transform .35s cubic-bezier(.2,.9,.2,1); }
+.nk-hp .bar .ghost { position: absolute; inset: 0; background: #ffd9d2; opacity: .5; transform-origin: left; transition: transform 1.2s .3s ease; }
+.nk-hp .bar::after { content: ''; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 22px, rgba(10,0,0,.85) 22px 24px); }
+.nk-hp .sub { display: flex; justify-content: space-between; margin-top: 4px; }
+.nk-hpnum { font-family: 'NK Chakra'; font-weight: 700; font-size: 26px; line-height: 1; color: var(--hp); text-shadow: 0 0 12px rgba(255,90,78,.6); min-width: 70px; margin-left: 8px; }
+.nk-hpnum small { font-size: 13px; color: rgba(255,97,88,.7); margin-left: 3px; }
+.nk-ram { display: flex; align-items: center; gap: 4px; margin: 8px 0 0 50px; }
+.nk-ram .lbl { font-size: 12px; color: var(--c); margin-right: 6px; letter-spacing: .2em; }
+.nk-ram i { width: 18px; height: 9px; background: var(--c); box-shadow: 0 0 8px rgba(94,246,255,.7); clip-path: polygon(0 0, 100% 0, 85% 100%, 0 100%); transition: background .3s, box-shadow .3s; }
+.nk-ram i.off { background: rgba(94,246,255,.15); box-shadow: none; }
+.nk-ram .val { font-family: 'NK Chakra'; font-size: 13px; color: var(--c); margin-left: 6px; }
+.nk-buffs { display: flex; gap: 6px; margin: 10px 0 0 50px; }
+.nk-buffs span { font-size: 11px; padding: 2px 8px 1px; color: var(--y); border: 1px solid rgba(252,238,10,.45); background: rgba(252,238,10,.06); clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%); }
+.nk-buffs span.c { color: var(--c); border-color: rgba(94,246,255,.45); background: rgba(94,246,255,.06); }
+
+/* ===================== COMPASS (top-center) ===================== */
+.nk-compass { position: absolute; top: 28px; left: 50%; width: 560px; height: 46px; transform: translateX(-50%);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent); mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent); }
+.nk-compass .strip { position: absolute; top: 6px; left: 0; height: 30px; white-space: nowrap; will-change: transform; }
+.nk-compass .tick { position: absolute; top: 14px; width: 1px; height: 6px; background: rgba(255,97,88,.55); }
+.nk-compass .tick.m { height: 10px; top: 10px; background: rgba(255,97,88,.8); }
+.nk-compass .lab { position: absolute; top: -4px; transform: translateX(-50%); font-size: 15px; color: var(--r); }
+.nk-compass .lab.card { color: var(--w); font-size: 17px; text-shadow: 0 0 8px rgba(255,255,255,.4); }
+.nk-compass .lab.n { color: var(--y); }
+.nk-compass .base { position: absolute; left: 0; right: 0; top: 26px; height: 1px; background: linear-gradient(90deg, transparent, rgba(255,97,88,.6), transparent); }
+.nk-compass .caret { position: absolute; left: 50%; top: 27px; width: 0; height: 0; border: 6px solid transparent; border-bottom-color: var(--y); transform: translateX(-50%); filter: drop-shadow(0 0 4px var(--y)); }
+.nk-compass .gig { position: absolute; top: 2px; transform: translateX(-50%); text-align: center; will-change: left; }
+.nk-compass .gig .d { width: 11px; height: 11px; margin: 0 auto; background: var(--y); transform: rotate(45deg); box-shadow: 0 0 10px var(--y); }
+.nk-compass .gig .m { margin-top: 18px; font-family: 'NK Chakra'; font-size: 11px; color: var(--y); }
+.nk-heading { position: absolute; top: 80px; left: 50%; transform: translateX(-50%); font-family: 'NK Mono'; font-size: 11px; color: rgba(255,97,88,.7); letter-spacing: .2em; }
+
+/* ===================== MINIMAP (top-right) ===================== */
+.nk-mapwrap { position: absolute; right: 34px; top: 26px; width: 290px; }
+.nk-maphead { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 5px; }
+.nk-time { font-family: 'NK Chakra'; font-weight: 700; font-size: 18px; color: var(--c); text-shadow: 0 0 10px rgba(94,246,255,.6); letter-spacing: .06em; }
+.nk-time small { font-size: 11px; margin-left: 4px; opacity: .8; }
+.nk-weather { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--c); }
+.nk-weather svg { width: 18px; height: 18px; }
+.nk-map { position: relative; width: 290px; height: 240px; clip-path: polygon(26px 0, 100% 0, 100% 100%, 0 100%, 0 26px); background: rgba(94,246,255,.55); }
+.nk-map canvas { position: absolute; inset: 1px; width: calc(100% - 2px); height: calc(100% - 2px); clip-path: polygon(25px 0, 100% 0, 100% 100%, 0 100%, 0 25px); }
+.nk-map .n { position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px; display: grid; place-items: center; font-family: 'NK Chakra'; font-weight: 700; font-size: 11px; color: #091316; background: var(--y); border-radius: 50%; box-shadow: 0 0 8px rgba(252,238,10,.8); }
+.nk-map .corner { position: absolute; left: 8px; bottom: 5px; font-family: 'NK Mono'; font-size: 9px; color: rgba(94,246,255,.6); letter-spacing: .14em; }
+.nk-map .scan { position: absolute; inset: 0; background: repeating-linear-gradient(0deg, rgba(0,0,0,.18) 0 1px, transparent 1px 3px); pointer-events: none; }
+.nk-mapfoot { display: flex; justify-content: space-between; margin-top: 5px; }
+.nk-mapfoot .loc { font-size: 13px; color: var(--c); }
+.nk-mapfoot .loc b { color: var(--w); font-weight: 700; }
+.nk-eddies { position: absolute; right: 0; top: 315px; text-align: right; }
+.nk-eddies .v { font-family: 'NK Chakra'; font-weight: 700; font-size: 20px; color: var(--y); text-shadow: 0 1px 3px rgba(0,0,0,.9), 0 0 10px rgba(252,238,10,.4); }
+.nk-eddies .v small { font-size: 13px; margin-right: 4px; }
+.nk-eddies .delta { font-family: 'NK Chakra'; font-size: 14px; color: var(--c); opacity: 0; transform: translateY(6px); transition: all .4s; }
+.nk-eddies .delta.show { opacity: 1; transform: none; }
+
+/* ===================== OBJECTIVE TRACKER ===================== */
+.nk-obj { position: absolute; right: 34px; top: 380px; width: 390px; text-align: left; padding: 8px 12px 10px 20px; background: linear-gradient(90deg, rgba(12,3,5,.55), rgba(12,3,5,.25) 70%, transparent); transition: opacity .4s, transform .4s; }
+.nk-obj::before { content: ''; position: absolute; left: 0; top: 4px; bottom: 4px; width: 2px; background: linear-gradient(var(--y), rgba(252,238,10,.1)); box-shadow: 0 0 8px var(--y); }
+.nk-obj .tag { font-family: 'NK Mono'; font-size: 10px; color: rgba(252,238,10,.65); letter-spacing: .22em; }
+.nk-obj .title { font-size: 21px; font-weight: 700; color: var(--y); text-shadow: 0 0 12px rgba(252,238,10,.4); margin: 2px 0 6px; letter-spacing: .06em; }
+.nk-obj .line { display: flex; gap: 10px; align-items: flex-start; font-size: 17px; color: var(--w); text-transform: none; letter-spacing: .02em; font-weight: 600; }
+.nk-obj .line .ic { flex: none; width: 16px; height: 16px; margin-top: 3px; border: 1.5px solid var(--y); display: grid; place-items: center; transform: rotate(45deg); }
+.nk-obj .line .ic::after { content: ''; width: 6px; height: 6px; background: var(--y); }
+.nk-obj .dist { margin: 5px 0 0 26px; font-family: 'NK Chakra'; font-size: 13px; color: var(--y); }
+.nk-obj.flash .title { animation: nkGlitchText .5s steps(2) 3; }
+.nk-obj.out { opacity: 0; transform: translateX(30px); }
+
+/* ===================== CROSSHAIR / PROMPT / WAYPOINT ===================== */
+.nk-cross { position: absolute; left: 50%; top: 50%; width: 30px; height: 30px; margin: -15px 0 0 -15px; transition: opacity .25s, transform .2s; }
+.nk-cross i { position: absolute; background: rgba(255,255,255,.85); box-shadow: 0 0 3px rgba(0,0,0,.8); }
+.nk-cross .dot { left: 14px; top: 14px; width: 2px; height: 2px; }
+.nk-cross .t { left: 14.5px; top: 3px; width: 1px; height: 6px; } .nk-cross .b { left: 14.5px; bottom: 3px; width: 1px; height: 6px; }
+.nk-cross .l { top: 14.5px; left: 3px; width: 6px; height: 1px; } .nk-cross .r { top: 14.5px; right: 3px; width: 6px; height: 1px; }
+.nk-cross.wide { transform: scale(1.35); }
+.nk-cross.hidden { opacity: 0; }
+.nk-prompt { position: absolute; left: calc(50% + 70px); top: calc(50% + 36px); min-width: 300px; opacity: 0; transform: translateX(-12px); transition: opacity .18s, transform .18s; }
+.nk-prompt.show { opacity: 1; transform: none; }
+.nk-prompt .sub { font-family: 'NK Mono'; font-size: 10px; color: rgba(94,246,255,.7); letter-spacing: .2em; margin: 0 0 4px 2px; }
+.nk-prompt .opt { position: relative; display: flex; align-items: center; gap: 12px; height: 36px; padding: 0 22px 0 6px; background: linear-gradient(90deg, rgba(252,238,10,.95), rgba(252,238,10,.82)); color: #120a00; font-size: 19px; font-weight: 700; clip-path: polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%); }
+.nk-prompt .opt::before { content: ''; position: absolute; left: -10px; top: 0; bottom: 0; width: 4px; background: var(--y); }
+.nk-key { display: inline-grid; place-items: center; min-width: 26px; height: 24px; padding: 0 6px; font-family: 'NK Chakra'; font-weight: 700; font-size: 13px; border: 1.5px solid currentColor; }
+.nk-prompt .opt .nk-key { color: #120a00; background: rgba(0,0,0,.08); }
+.nk-wp { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); text-align: center; will-change: transform; transition: opacity .3s; }
+.nk-wp .d { width: 22px; height: 22px; margin: 0 auto; border: 2px solid var(--y); transform: rotate(45deg); display: grid; place-items: center; box-shadow: 0 0 12px rgba(252,238,10,.6), inset 0 0 8px rgba(252,238,10,.4); }
+.nk-wp .d::after { content: '!'; transform: rotate(-45deg); font-family: 'NK Chakra'; font-weight: 700; font-size: 13px; color: var(--y); }
+.nk-wp .m { margin-top: 6px; font-family: 'NK Chakra'; font-weight: 700; font-size: 14px; color: var(--y); text-shadow: 0 0 6px rgba(0,0,0,.9), 0 0 10px rgba(252,238,10,.4); }
+.nk-wp.edge .d { border-color: var(--y); background: rgba(252,238,10,.2); }
+
+/* ===================== DISTRICT POP-UP ===================== */
+.nk-district { position: absolute; left: 0; right: 0; top: 19%; text-align: center; opacity: 0; }
+.nk-district.show { animation: nkDistrict 4.6s cubic-bezier(.2,.8,.2,1) forwards; }
+.nk-district .pre { font-family: 'NK Mono'; font-size: 12px; letter-spacing: .5em; color: rgba(94,246,255,.8); margin-bottom: 6px; }
+.nk-district .name { position: relative; display: inline-block; font-family: 'NK Chakra'; font-weight: 700; font-size: 58px; line-height: 1; letter-spacing: .14em; color: var(--w); text-shadow: 0 0 22px rgba(255,255,255,.25); padding: 0 .1em; }
+.nk-district .name::before, .nk-district .name::after { content: attr(data-t); position: absolute; inset: 0; padding: 0 .1em; }
+.nk-district .name::before { color: var(--r); transform: translate(-3px, 0); clip-path: inset(0 0 60% 0); mix-blend-mode: screen; animation: nkSlice 2.2s steps(1) infinite; }
+.nk-district .name::after { color: var(--c); transform: translate(3px, 0); clip-path: inset(55% 0 0 0); mix-blend-mode: screen; animation: nkSlice 1.7s steps(1) infinite reverse; }
+.nk-district .rule { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 12px auto 0; }
+.nk-district .rule::before, .nk-district .rule::after { content: ''; height: 1px; width: 0; background: var(--y); box-shadow: 0 0 6px var(--y); animation: nkGrow .9s .25s cubic-bezier(.2,.8,.2,1) forwards; }
+.nk-district .area { font-size: 22px; font-weight: 700; color: var(--y); letter-spacing: .3em; text-shadow: 0 0 12px rgba(252,238,10,.5); }
+.nk-district .jp { display: block; margin-top: 8px; font-size: 15px; color: var(--r); letter-spacing: .6em; }
+.nk-district.tint-cyan .area { color: var(--c); text-shadow: 0 0 12px rgba(94,246,255,.5); }
+.nk-district.tint-pink .area { color: #ff7fc8; text-shadow: 0 0 12px rgba(255,127,200,.5); }
+.nk-district.tint-red .area { color: var(--r); text-shadow: 0 0 12px rgba(255,97,88,.5); }
+
+/* ===================== TOASTS ===================== */
+.nk-toasts { position: absolute; right: 34px; top: 560px; width: 380px; display: flex; flex-direction: column; gap: 10px; align-items: flex-end; }
+.nk-toast { position: relative; width: 380px; padding: 14px 18px 14px 22px; background: linear-gradient(100deg, rgba(40,8,10,.92), rgba(20,4,6,.75)); clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px)); animation: nkToastIn .45s cubic-bezier(.2,.9,.2,1) both; }
+.nk-toast::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--y); box-shadow: 0 0 12px var(--y); }
+.nk-toast::after { content: ''; position: absolute; inset: 0; border: 1px solid rgba(255,97,88,.35); clip-path: inherit; pointer-events: none; }
+.nk-toast .k { font-family: 'NK Mono'; font-size: 10px; letter-spacing: .25em; color: rgba(94,246,255,.8); }
+.nk-toast .h { font-family: 'NK Chakra'; font-weight: 700; font-size: 24px; color: var(--y); letter-spacing: .08em; margin: 3px 0 8px; text-shadow: 0 0 14px rgba(252,238,10,.45); }
+.nk-toast .rw { display: flex; gap: 22px; font-size: 16px; color: var(--w); }
+.nk-toast .rw b { font-family: 'NK Chakra'; color: var(--y); font-size: 18px; margin-right: 6px; }
+.nk-toast .rw b.c { color: var(--c); }
+.nk-toast.out { animation: nkToastOut .5s ease forwards; }
+.nk-toast.info::before { background: var(--c); box-shadow: 0 0 12px var(--c); }
+.nk-toast.info .h { color: var(--c); font-size: 20px; text-shadow: 0 0 14px rgba(94,246,255,.45); }
+
+/* ===================== BOTTOM-LEFT / BOTTOM-RIGHT ===================== */
+.nk-bl { position: absolute; left: 34px; bottom: 30px; }
+.nk-slots { display: flex; gap: 8px; align-items: flex-end; }
+.nk-slot { position: relative; width: 54px; height: 54px; display: grid; place-items: center; background: rgba(20,5,7,.55); clip-path: polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%); box-shadow: inset 0 0 0 1px rgba(94,246,255,.45); color: var(--c); }
+.nk-slot svg { width: 26px; height: 26px; }
+.nk-slotw { display: flex; flex-direction: column; align-items: center; gap: 7px; }
+.nk-slotw > .nk-key { color: var(--c); font-size: 12px; min-width: 24px; height: 20px; }
+.nk-slotw > .lb { font-size: 11px; letter-spacing: .14em; color: rgba(94,246,255,.7); margin-top: -3px; }
+.nk-slotw.active .nk-slot { box-shadow: inset 0 0 0 1px var(--y); color: var(--y); background: rgba(252,238,10,.08); }
+.nk-slotw.active > .nk-key, .nk-slotw.active > .lb { color: var(--y); }
+.nk-bl .tiny { margin-top: 12px; }
+.nk-br { position: absolute; right: 34px; bottom: 30px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.nk-stance { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--r); }
+.nk-stance svg { width: 22px; height: 30px; }
+.nk-stance.crouch { color: var(--c); }
+.nk-hint { font-size: 15px; color: var(--r); display: flex; align-items: center; gap: 8px; }
+.nk-hint .nk-key { color: var(--c); font-size: 11px; height: 20px; min-width: 22px; }
+
+/* speedometer */
+.nk-speedo { position: absolute; right: 60px; bottom: 70px; width: 300px; height: 170px; opacity: 0; transform: translateY(20px); transition: opacity .35s, transform .35s; }
+.nk-speedo.show { opacity: 1; transform: none; }
+.nk-speedo svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.nk-speedo .num { position: absolute; right: 30px; bottom: 34px; font-family: 'NK Chakra'; font-weight: 700; font-size: 74px; line-height: 1; color: var(--w); text-shadow: 0 0 18px rgba(255,97,88,.6); font-variant-numeric: tabular-nums; }
+.nk-speedo .unit { position: absolute; right: 32px; bottom: 16px; font-size: 14px; color: var(--r); letter-spacing: .3em; }
+.nk-speedo .gear { position: absolute; left: 150px; bottom: 22px; font-family: 'NK Chakra'; font-weight: 700; font-size: 30px; color: var(--y); }
+.nk-speedo .gear small { display: block; font-family: 'NK Mono'; font-size: 9px; font-weight: 400; color: rgba(252,238,10,.7); letter-spacing: .2em; }
+.nk-speedo .hint { position: absolute; right: 30px; bottom: -26px; display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--r); letter-spacing: .12em; white-space: nowrap; }
+.nk-speedo .hint .nk-key { color: var(--c); font-size: 10px; height: 18px; min-width: 20px; }
+.nk-speedo .car { position: absolute; right: 30px; top: 0; font-size: 13px; color: var(--c); letter-spacing: .2em; }
+
+/* damage/scan line overlay accent */
+.nk-glitchbar { position: absolute; left: 0; right: 0; height: 2px; background: rgba(94,246,255,.25); top: -10px; opacity: 0; }
+.nk-glitchbar.go { animation: nkSweep .7s linear; }
+
+/* ===================== TITLE SCREEN ===================== */
+.nk-title { position: absolute; inset: 0; pointer-events: auto; cursor: pointer; opacity: 0; transition: opacity 1.2s ease; display: none;
+  background: radial-gradient(ellipse at 30% 55%, rgba(5,2,8,.15), rgba(5,2,8,.82) 75%), linear-gradient(90deg, rgba(8,2,6,.88) 0%, rgba(8,2,6,.35) 48%, rgba(8,2,6,0) 70%); }
+#nk.state-title .nk-title { display: block; opacity: 1; }
+#nk.state-title.title-leaving .nk-title { opacity: 0; transition: opacity 1.4s ease; }
+.nk-title .frame { position: absolute; inset: 26px; border: 1px solid rgba(255,97,88,.18); clip-path: polygon(0 0, 100% 0, 100% calc(100% - 40px), calc(100% - 40px) 100%, 0 100%); }
+.nk-title .topline { position: absolute; left: 26px; right: 26px; top: 64px; height: 1px; background: linear-gradient(90deg, rgba(255,97,88,.6), rgba(255,97,88,.1) 60%, transparent); }
+.nk-title .vert { position: absolute; left: 40px; top: 50%; transform: translateY(-50%) rotate(-90deg); transform-origin: left center; font-family: 'NK Mono'; font-size: 11px; color: rgba(255,97,88,.55); letter-spacing: .3em; white-space: nowrap; }
+.nk-title .corner-tl { position: absolute; left: 60px; top: 38px; display: flex; gap: 12px; align-items: center; }
+.nk-title .corner-tl .tiny { color: rgba(255,97,88,.7); line-height: 1.35; }
+.nk-title .barcode { width: 54px; height: 22px; background: repeating-linear-gradient(90deg, var(--r) 0 2px, transparent 2px 3px, var(--r) 3px 4px, transparent 4px 7px, var(--r) 7px 10px, transparent 10px 11px); opacity: .8; }
+.nk-title .logo { position: absolute; left: 9%; top: 26%; }
+.nk-title .logo .kicker { font-family: 'NK Mono'; font-size: 13px; color: var(--c); letter-spacing: .55em; margin-bottom: 10px; opacity: 0; animation: nkFadeUp .8s .4s forwards; }
+.nk-logo { position: relative; font-family: 'NK Chakra'; font-weight: 700; font-size: 148px; line-height: .86; letter-spacing: -.01em; color: var(--y); font-style: italic; transform: skewX(-6deg);
+  text-shadow: 6px 6px 0 rgba(229,67,60,.95), 0 0 50px rgba(252,238,10,.25); }
+.nk-logo span { display: block; }
+.nk-logo span:nth-of-type(2) { margin-left: 92px; }
+.nk-logo::before, .nk-logo::after { content: attr(data-t); position: absolute; inset: 0; white-space: pre; }
+.nk-logo .gl { position: absolute; inset: 0; pointer-events: none; }
+.nk-logo .gl b { position: absolute; left: 0; right: 0; display: block; background: var(--c); mix-blend-mode: screen; opacity: 0; height: 6px; }
+.nk-logo .gl b:nth-child(1) { top: 22%; animation: nkGlitchBar 3.1s steps(1) infinite; }
+.nk-logo .gl b:nth-child(2) { top: 61%; height: 3px; animation: nkGlitchBar 2.3s .8s steps(1) infinite; background: var(--r); }
+.nk-logo .gl b:nth-child(3) { top: 78%; height: 10px; animation: nkGlitchBar 4.7s 1.3s steps(1) infinite; }
+.nk-logo-wrap { position: relative; animation: nkLogoIn 1.4s cubic-bezier(.2,.9,.2,1) both, nkLogoJitter 6s 2s steps(1) infinite; }
+.nk-title .jpline { display: flex; align-items: center; gap: 18px; margin: 26px 0 0 128px; opacity: 0; animation: nkFadeUp .8s .9s forwards; }
+.nk-title .jpline .jp { font-size: 28px; color: var(--r); letter-spacing: .5em; text-shadow: 0 0 14px rgba(255,97,88,.55); }
+.nk-title .jpline i { display: block; width: 160px; height: 2px; background: var(--r); box-shadow: 0 0 8px var(--r); }
+.nk-title .tagline { margin: 14px 0 0 130px; font-size: 18px; color: rgba(233,246,247,.75); letter-spacing: .35em; opacity: 0; animation: nkFadeUp .8s 1.1s forwards; }
+.nk-title .press { position: absolute; left: 9%; bottom: 17%; display: flex; align-items: center; gap: 16px; opacity: 0; animation: nkFadeUp .6s 1.6s forwards; }
+.nk-title .press .btn { position: relative; display: flex; align-items: center; gap: 14px; height: 54px; padding: 0 34px 0 14px; background: rgba(229,67,60,.14); color: var(--w); font-size: 22px; font-weight: 700; letter-spacing: .3em;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%); box-shadow: inset 0 0 0 1px rgba(255,97,88,.7); }
+.nk-title .press .btn .nk-key { color: var(--c); }
+.nk-title .press .btn::after { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--y); box-shadow: 0 0 10px var(--y); }
+.nk-title .press .blink { animation: nkBlink 1.4s ease-in-out infinite; }
+.nk-title .press .tiny { font-size: 10px; color: rgba(94,246,255,.6); line-height: 1.5; }
+.nk-title .legal { position: absolute; left: 60px; right: 60px; bottom: 40px; display: flex; justify-content: space-between; align-items: flex-end; }
+.nk-title .legal .tiny { font-size: 9px; line-height: 1.6; color: rgba(255,97,88,.5); max-width: 520px; text-transform: none; }
+.nk-title .legal .ver { font-family: 'NK Mono'; font-size: 11px; color: rgba(94,246,255,.55); letter-spacing: .2em; text-align: right; }
+.nk-title .scan { position: absolute; inset: 0; background: repeating-linear-gradient(0deg, rgba(0,0,0,.14) 0 1px, transparent 1px 3px); pointer-events: none; }
+.nk-title .flash { position: absolute; inset: 0; background: var(--y); opacity: 0; pointer-events: none; mix-blend-mode: overlay; }
+#nk.title-leaving .nk-title .flash { animation: nkFlash .6s ease-out; }
+
+/* ===================== PAUSE MENU ===================== */
+.nk-menu { position: absolute; inset: 0; pointer-events: auto; display: none; color: var(--r);
+  background: radial-gradient(ellipse at 70% 40%, rgba(60,8,12,.55), rgba(10,2,4,.92) 70%); backdrop-filter: blur(6px) saturate(.7); }
+#nk.state-paused .nk-menu { display: block; animation: nkMenuIn .35s cubic-bezier(.2,.9,.2,1); }
+.nk-menu .grid { position: absolute; inset: 0; background-image: linear-gradient(rgba(255,97,88,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,97,88,.05) 1px, transparent 1px); background-size: 48px 48px; -webkit-mask-image: radial-gradient(ellipse at 50% 50%, #000 30%, transparent 85%); mask-image: radial-gradient(ellipse at 50% 50%, #000 30%, transparent 85%); }
+.nk-menu .scan { position: absolute; inset: 0; background: repeating-linear-gradient(0deg, rgba(0,0,0,.18) 0 1px, transparent 1px 3px); pointer-events: none; }
+.nk-menu .topbar { position: absolute; left: 0; right: 0; top: 52px; height: 1px; background: linear-gradient(90deg, rgba(255,97,88,.7), rgba(255,97,88,.25) 30%, rgba(255,97,88,.25) 70%, rgba(255,97,88,.7)); }
+.nk-menu .header { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; }
+.nk-menu .header .ico { width: 34px; height: 30px; border: 1.5px solid var(--c); display: grid; place-items: center; color: var(--c); font-family: 'NK Mono'; font-size: 9px; line-height: 1; }
+.nk-menu .header h1 { margin: 0; font-family: 'NK Rajdhani'; font-weight: 600; font-size: 30px; color: var(--c); letter-spacing: .1em; text-shadow: 0 0 14px rgba(94,246,255,.5); }
+.nk-menu .tabs { position: absolute; left: 50%; top: 52px; transform: translateX(-50%); display: flex; }
+.nk-menu .tabs span { width: 120px; height: 3px; background: rgba(255,97,88,.25); margin: 0 3px; transition: background .2s; }
+.nk-menu .tabs span.on { background: var(--c); box-shadow: 0 0 8px var(--c); }
+.nk-menu .subtitle { position: absolute; left: 50%; top: 68px; transform: translateX(-50%); font-size: 14px; color: var(--r); letter-spacing: .12em; }
+.nk-menu .protocol { position: absolute; left: 48px; top: 64px; display: flex; gap: 10px; align-items: flex-start; }
+.nk-menu .protocol .tiny { font-family: 'NK Mono'; font-size: 9px; line-height: 1.4; color: rgba(255,97,88,.6); letter-spacing: .1em; }
+.nk-menu .vert { position: absolute; left: 22px; top: 52%; transform: rotate(-90deg); transform-origin: left center; font-family: 'NK Mono'; font-size: 10px; letter-spacing: .3em; color: rgba(255,97,88,.4); white-space: nowrap; }
+.nk-menu .left { position: absolute; left: 90px; top: 150px; width: 380px; }
+.nk-menu .left h2 { margin: 0 0 18px; font-size: 22px; font-weight: 600; color: var(--r); letter-spacing: .12em; }
+.nk-mi { position: relative; display: flex; align-items: center; justify-content: space-between; height: 54px; margin-bottom: 10px; padding: 0 20px; cursor: pointer; font-size: 22px; font-weight: 600; letter-spacing: .1em; color: var(--r);
+  background: linear-gradient(90deg, rgba(92,20,24,.35), rgba(92,20,24,.08)); clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%); transition: color .15s, background .15s; }
+.nk-mi::before { content: ''; position: absolute; inset: 0; box-shadow: inset 0 0 0 1px rgba(255,97,88,.28); clip-path: inherit; pointer-events: none; }
+.nk-mi .ix { font-family: 'NK Mono'; font-size: 11px; color: rgba(255,97,88,.5); }
+.nk-mi.sel { color: var(--c); background: linear-gradient(90deg, rgba(229,67,60,.38), rgba(229,67,60,.12)); }
+.nk-mi.sel::before { box-shadow: inset 0 0 0 1px rgba(255,97,88,.85); }
+.nk-mi.sel::after { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--c); box-shadow: 0 0 10px var(--c); }
+.nk-mi.sel .ix { color: var(--c); }
+.nk-menu .right { position: absolute; right: 110px; top: 150px; width: 640px; }
+.nk-menu .right h2 { margin: 0 0 18px; text-align: right; font-size: 22px; font-weight: 600; color: var(--r); letter-spacing: .12em; }
+.nk-menu .panel { display: none; }
+.nk-menu .panel.on { display: block; animation: nkPanelIn .3s ease; }
+.nk-set { margin-bottom: 7px; }
+.nk-set .lab { position: relative; display: flex; justify-content: space-between; align-items: center; height: 40px; padding: 0 16px; font-size: 18px; color: var(--r);
+  background: linear-gradient(90deg, rgba(92,20,24,.45), rgba(92,20,24,.2)); clip-path: polygon(0 0, calc(100% - 70px) 0, calc(100% - 62px) 6px, 100% 6px, 100% 100%, 0 100%); }
+.nk-set .lab .v { font-family: 'NK Chakra'; font-weight: 700; color: var(--r); font-size: 18px; }
+.nk-set .ctl { display: flex; gap: 4px; margin-top: 3px; height: 28px; }
+.nk-set .ctl div { flex: 1; display: grid; place-items: center; cursor: pointer; background: rgba(92,20,24,.3); box-shadow: inset 0 0 0 1px rgba(255,97,88,.25); color: var(--r); font-size: 14px; transition: background .15s; }
+.nk-set .ctl div:hover { background: rgba(229,67,60,.3); }
+.nk-set .ctl .pips { flex: 2; display: flex; align-items: center; justify-content: center; gap: 4px; cursor: default; }
+.nk-set .ctl .pips i { width: 26px; height: 6px; background: rgba(255,97,88,.25); }
+.nk-set .ctl .pips i.on { background: var(--r); box-shadow: 0 0 6px rgba(255,97,88,.6); }
+.nk-set.sel .lab { background: linear-gradient(90deg, rgba(229,67,60,.5), rgba(229,67,60,.25)); color: var(--w); }
+.nk-set.sel .lab .v { color: var(--c); }
+.nk-set.sel .ctl div { box-shadow: inset 0 0 0 1px rgba(255,97,88,.7); }
+.nk-set.sel .ctl .arrow { color: var(--c); }
+.nk-set .note { font-family: 'NK Mono'; font-size: 10px; color: var(--y); letter-spacing: .15em; margin-top: 4px; text-align: right; min-height: 12px; }
+.nk-set .ctl .pips.bool { gap: 0; padding: 0 14px; }
+.nk-set .ctl .pips.bool b { flex: 1; text-align: center; font-weight: 600; font-size: 14px; letter-spacing: .2em; color: rgba(255,97,88,.45); padding: 4px 0; }
+.nk-set .ctl .pips.bool b.on { color: #1a0505; background: var(--r); box-shadow: 0 0 10px rgba(255,97,88,.5); }
+.nk-set.sel .ctl .pips.bool b.on { background: var(--c); box-shadow: 0 0 10px rgba(94,246,255,.5); }
+.nk-menu .desc { margin-top: 14px; padding: 12px 16px; min-height: 64px; font-size: 15px; color: rgba(233,246,247,.7); text-transform: none; letter-spacing: .03em; background: rgba(10,2,4,.5); border-left: 2px solid var(--c); }
+.nk-menu .desc b { display: block; font-size: 12px; color: var(--c); letter-spacing: .2em; text-transform: uppercase; margin-bottom: 4px; }
+.nk-menu .wm { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); writing-mode: vertical-rl; font-size: 150px; line-height: 1; color: rgba(255,97,88,.035); letter-spacing: .05em; pointer-events: none; white-space: nowrap; }
+.nk-ctrls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 26px; }
+.nk-ctrls .c { display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 12px; font-size: 17px; color: var(--r); background: linear-gradient(90deg, rgba(92,20,24,.38), rgba(92,20,24,.08)); border-left: 2px solid rgba(255,97,88,.5); }
+.nk-ctrls .c .k { display: flex; gap: 4px; }
+.nk-ctrls .c .nk-key { color: var(--c); font-size: 12px; height: 24px; }
+.nk-menu .quote { margin-top: 26px; font-size: 14px; color: rgba(233,246,247,.55); letter-spacing: .1em; text-transform: none; line-height: 1.5; }
+.nk-menu .stats { margin-top: 24px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.nk-menu .stats > div { padding: 12px 14px; background: rgba(92,20,24,.25); box-shadow: inset 0 0 0 1px rgba(255,97,88,.2); }
+.nk-menu .stats .k { font-family: 'NK Mono'; font-size: 10px; letter-spacing: .2em; color: rgba(255,97,88,.65); }
+.nk-menu .stats .v { font-family: 'NK Chakra'; font-weight: 700; font-size: 26px; color: var(--y); margin-top: 4px; }
+.nk-menu .stats .v.c { color: var(--c); }
+.nk-menu .journal { display: flex; flex-direction: column; gap: 4px; }
+.nk-menu .jr { display: grid; grid-template-columns: 28px 1fr 190px 110px; align-items: center; height: 38px; padding: 0 14px 0 8px; font-size: 17px; color: rgba(255,97,88,.55); background: linear-gradient(90deg, rgba(92,20,24,.3), rgba(92,20,24,.06)); }
+.nk-menu .jr .st { font-family: 'NK Chakra'; text-align: center; }
+.nk-menu .jr .ar { font-size: 13px; letter-spacing: .14em; }
+.nk-menu .jr .rw { font-family: 'NK Chakra'; font-size: 14px; text-align: right; }
+.nk-menu .jr.active { color: var(--y); background: linear-gradient(90deg, rgba(252,238,10,.14), rgba(252,238,10,.02)); box-shadow: inset 2px 0 0 var(--y); }
+.nk-menu .jr.done { color: var(--c); }
+.nk-menu .jr.done .tt { text-decoration: line-through; text-decoration-color: rgba(94,246,255,.5); }
+.nk-menu .legend { position: absolute; right: 70px; bottom: 44px; display: flex; gap: 30px; }
+.nk-menu .legend span { display: flex; align-items: center; gap: 10px; font-size: 19px; color: var(--c); }
+.nk-menu .legend .nk-key { font-size: 11px; height: 24px; }
+.nk-menu .foot { position: absolute; left: 48px; bottom: 40px; display: flex; gap: 14px; align-items: flex-end; }
+.nk-menu .foot .logo-s { font-family: 'NK Chakra'; font-weight: 700; font-style: italic; font-size: 20px; color: var(--y); line-height: .9; text-shadow: 2px 2px 0 var(--r2); }
+.nk-menu .foot .tiny { font-family: 'NK Mono'; font-size: 9px; line-height: 1.5; color: rgba(255,97,88,.5); text-transform: none; max-width: 420px; }
+
+/* ===================== ANIMATIONS ===================== */
+@keyframes nkDistrict {
+  0% { opacity: 0; transform: scale(1.06); filter: blur(6px); }
+  6% { opacity: 1; transform: none; filter: none; }
+  8% { opacity: .3; } 10% { opacity: 1; } 12% { opacity: .6; transform: translateX(4px); } 14% { opacity: 1; transform: none; }
+  82% { opacity: 1; transform: none; filter: none; }
+  86% { opacity: .4; transform: translateX(-6px); }
+  88% { opacity: 1; transform: none; }
+  100% { opacity: 0; transform: translateY(-8px); filter: blur(3px); }
+}
+@keyframes nkGrow { to { width: 140px; } }
+@keyframes nkSlice {
+  0% { clip-path: inset(0 0 60% 0); transform: translate(-3px, 0); }
+  20% { clip-path: inset(40% 0 30% 0); transform: translate(4px, 0); }
+  40% { clip-path: inset(80% 0 2% 0); transform: translate(-2px, 0); }
+  60% { clip-path: inset(10% 0 75% 0); transform: translate(3px, 0); }
+  80% { clip-path: inset(100% 0 0 0); transform: none; }
+}
+@keyframes nkGlitchText { 0% { transform: translateX(-3px); text-shadow: 2px 0 var(--c), -2px 0 var(--r); } 50% { transform: translateX(3px); } 100% { transform: none; } }
+@keyframes nkToastIn { 0% { opacity: 0; transform: translateX(60px); clip-path: polygon(0 0, 0 0, 0 100%, 0 100%); } 100% { opacity: 1; transform: none; } }
+@keyframes nkToastOut { to { opacity: 0; transform: translateX(40px); } }
+@keyframes nkSweep { from { top: -2px; opacity: 1; } to { top: 100%; opacity: 0; } }
+@keyframes nkFadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes nkBlink { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@keyframes nkFlash { 0% { opacity: .5; } 100% { opacity: 0; } }
+@keyframes nkLogoIn {
+  0% { opacity: 0; transform: translateX(-40px); filter: blur(10px); clip-path: inset(0 100% 0 0); }
+  40% { opacity: 1; filter: blur(0); }
+  100% { opacity: 1; transform: none; clip-path: inset(0 -10% 0 0); }
+}
+@keyframes nkLogoJitter {
+  0%, 100% { transform: none; filter: none; }
+  71% { transform: translate(4px, -1px); filter: hue-rotate(-20deg); }
+  72% { transform: translate(-6px, 1px); }
+  73% { transform: none; filter: none; }
+  90% { transform: translateX(2px); }
+  91% { transform: none; }
+}
+@keyframes nkGlitchBar { 0%, 100% { opacity: 0; } 7% { opacity: .9; transform: translateX(-20px); } 9% { opacity: 0; } 51% { opacity: .7; transform: translateX(30px) scaleX(.6); } 52% { opacity: 0; } }
+@keyframes nkMenuIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes nkPanelIn { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
