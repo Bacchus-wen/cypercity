@@ -39,6 +39,26 @@ export class HeightField {
     return select(inside, t, float(0));
   }
 
+  // Compile the pipelines of this pass (override material, own target, top-level render) before the first frame,
+  // with the same scene state update() renders with.
+  async precompile() {
+    const { scene } = this.ctx;
+    const compilePass = this.ctx.engine.compilePass;
+    if (!compilePass) return;
+    const prevBg = scene.background, prevBgNode = scene.backgroundNode;
+    const prevOverride = scene.overrideMaterial;
+    for (const o of this.hideList) o.visible = false;
+    try {
+      scene.background = null; scene.backgroundNode = null;
+      scene.overrideMaterial = this.mat;
+      await compilePass(scene, this.cam, { renderTarget: this.rt, callDepth: 0, label: 'rain occlusion', weight: 0.13 });
+    } finally {
+      scene.background = prevBg; scene.backgroundNode = prevBgNode;
+      scene.overrideMaterial = prevOverride;
+      for (const o of this.hideList) o.visible = true;
+    }
+  }
+
   update(force = false) {
     const { renderer, scene, camera } = this.ctx;
     this.framesSince++;

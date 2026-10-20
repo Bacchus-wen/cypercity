@@ -42,6 +42,7 @@ export async function buildTrees(ctx, tex, root) {
     bark.normalNode = normalMap(texture(tex.bark_n, u0), vec2(1.6, 1.6));
   }
   const blossom = new THREE.MeshStandardNodeMaterial({ side: THREE.DoubleSide, alphaTest: 0.5, transparent: false });
+  blossom.lineMask = 1; // anime look: no ink lines inside the crown, silhouette only
   {
     const u0 = uv();
     const t = texture(tex.blossom, u0);

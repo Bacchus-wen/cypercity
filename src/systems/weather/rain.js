@@ -8,6 +8,7 @@ import {
 } from 'three/tsl';
 import { U, fmod, makeLightFn, streakQuad, softClamp } from './common.js';
 import { MAX_LIGHTS } from './lights.js';
+import { ANIME } from '../../engine/AnimeLook.js';
 
 export class Rain {
   constructor(ctx, { heightField, lights, splashes, nearCount = 32768, midCount = 163840, farCount = 131072 } = {}) {
@@ -15,7 +16,7 @@ export class Rain {
     this.N1 = nearCount; this.N2 = midCount; this.N3 = farCount; this.N = nearCount + midCount + farCount;
     this.hf = heightField; this.lights = lights; this.splashes = splashes;
     this.params = { nearR: 12, nearTop: 9, nearBot: 5, midR: 34, midTop: 20, midBot: 12, farR: 85, farTop: 32, farBot: 32 };
-    this.streakT = uniform(0.055);
+    this.streakT = uniform(ANIME ? 0.035 : 0.055); // anime: shorter strokes
     this.opacity = uniform(1.0);
     this.lightGain = uniform(0.10);
     this.ambGain = uniform(2.5);
@@ -135,8 +136,15 @@ export class Rain {
     const u = uv();
     const across = float(1).sub(abs(u.x.mul(2).sub(1)));
     const along = smoothstep(0.0, 0.25, u.y).mul(smoothstep(1.0, 0.8, u.y)).mul(u.y.mul(0.5).add(0.5));
-    mat.colorNode = vCol.add(bg.mul(this.bgGain));
-    mat.opacityNode = vAlpha.mul(across.mul(across)).mul(along).mul(this.opacity);
+    if (ANIME) {
+      // anime look: crisp thin lines in one flat pale colour (lightning still flashes them), no refraction of the
+      // background, so rain reads as drawn strokes rather than lit water
+      mat.colorNode = vec3(0.3, 0.36, 0.5).add(vec3(0.55, 0.6, 0.75).mul(U.lightning.mul(2.5)));
+      mat.opacityNode = vAlpha.mul(smoothstep(0.35, 0.55, across)).mul(along).mul(this.opacity).min(0.45);
+    } else {
+      mat.colorNode = vCol.add(bg.mul(this.bgGain));
+      mat.opacityNode = vAlpha.mul(across.mul(across)).mul(along).mul(this.opacity);
+    }
     this.material = mat;
 
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1, 1, 1), mat);

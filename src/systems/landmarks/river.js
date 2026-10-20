@@ -70,6 +70,20 @@ export function buildRiver(ctx, tex, root) {
   waterMesh.position.set(R.xCenter, W, zMid);
   waterMesh.name = 'river_water';
   root.add(waterMesh);
+  // The reflector re-renders the whole city every frame the water is drawn, and the huge water plane is drawn whenever
+  // it is inside the frustum, even when buildings hide every pixel of it (e.g. anywhere on the avenue). The reflection
+  // is only ever seen through water pixels, so skip it while the GPU occlusion query of the scene pass says no water
+  // fragment passed the depth test (results arrive a frame or two late; the water itself is still drawn and queried).
+  // ?reflgate=0 renders it every frame as before.
+  if (new URLSearchParams(location.search).get('reflgate') !== '0') {
+    waterMesh.occlusionTest = true;
+    const base = refl.reflector;
+    const updateBefore = base.updateBefore;
+    base.updateBefore = function (frame) {
+      if (frame.renderer.isOccluded(waterMesh)) return;
+      return updateBefore.call(this, frame);
+    };
+  }
 
   // ---------------- embankment walls ----------------
   const b = new Batch();

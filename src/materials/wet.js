@@ -18,9 +18,9 @@ import * as THREE from 'three/webgpu';
 import {
   float, vec2, vec3, vec4, uniform, time, fract, floor, length, exp, cos, sin, mix, smoothstep, clamp, max, min, abs, dot, sqrt,
   normalize, normalWorldGeometry, normalViewGeometry, positionWorld, cameraViewMatrix, materialColor, materialRoughness,
-  normalMap, texture, select,
-} from 'three/tsl';
+  normalMap, texture, select, mx_worley_noise_float } from 'three/tsl';
 import { hash23, hash21, vnoise, fbm } from './noise.js';
+import { ANIME, animeGroundAlbedo } from '../engine/AnimeLook.js';
 
 export const wetUniforms = {
   wetness: uniform(1.0),  // 0 dry .. 1 soaked
@@ -77,7 +77,7 @@ export function wetLayer({ albedo, roughness, nxy, porosity = 0.7, wetness = wet
   const por = float(porosity);
   // porous surfaces darken strongly when soaked; non porous barely
   const dark = mix(float(1), mix(0.88, 0.42, por), w);
-  const a1 = albedo.mul(dark);
+  const a1 = (ANIME ? animeGroundAlbedo(albedo) : albedo).mul(dark);
   // water film: roughness collapses toward a low value, keeping some of the original variation for streaky breakup
   const filmR = clamp(roughness.mul(film[0]).add(film[1]), 0.02, 0.5);
   const r1 = mix(roughness, filmR, w.mul(mix(0.85, 1.0, por)));
@@ -90,6 +90,18 @@ export function wetLayer({ albedo, roughness, nxy, porosity = 0.7, wetness = wet
   const r2 = mix(r1, float(0.012), smoothstep(0.0, 0.6, p));
   let n2 = mix(n1, vec2(0), smoothstep(0.0, 0.5, p));
   if (ripple) n2 = n2.add(ripple.mul(p));
+  // anime look: almost flat normals (micro relief and ripple sparkle read as photographic grain and break SSR into
+  // speckles) and a compressed roughness range
+  // ...and mirror reflections only in puddles: elsewhere the wet ground keeps a dull sheen, so reflections become
+  // placed shapes instead of a mirror copy of the whole street
+  // (only puddle cores mirror, cut into separate rounded islands by a cellular mask, so connected sheets become
+  // individual placed puddles)
+  if (ANIME) {
+    const cell = mx_worley_noise_float(positionWorld.xz.mul(0.32));
+    const island = smoothstep(0.62, 0.5, cell);
+    const pm = smoothstep(0.35, 0.6, p).mul(island);
+    return { albedo: a2, roughness: mix(float(0.5), r2, pm), nxy: n2.mul(0.18), puddle: p.mul(island) };
+  }
   return { albedo: a2, roughness: r2, nxy: n2, puddle: p };
 }
 

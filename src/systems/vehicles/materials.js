@@ -78,6 +78,7 @@ function perturbView(offsetGeom, amount) {
 // ---------------------------------------------------------------------------------------------- materials
 export function makePaint({ metalness = 0.55, roughness = 0.34, flake = 1.0, coatRough = 0.035, solid = false } = {}, paintNode = null) {
   const m = new THREE.MeshPhysicalNodeMaterial();
+  m.animeRim = 1; // anime look: hard rim light
   const p = positionGeometry;
   // metallic flakes: high-frequency jittered cells -> brightness + normal tilt (under the clearcoat)
   const fc = p.mul(520.0);
@@ -102,6 +103,7 @@ export function makePaint({ metalness = 0.55, roughness = 0.34, flake = 1.0, coa
 
 export function makeGlass({ opacity = 0.86 } = {}) {
   const m = new THREE.MeshPhysicalNodeMaterial({ transparent: true, depthWrite: true, side: THREE.FrontSide });
+  m.animeRim = 1; // anime look: hard rim light
   const rain = rainNodes({ beadScale: 1.4, strength: 1.0 });
   m.colorNode = vec3(0.012, 0.014, 0.018);
   m.metalnessNode = float(0.0);
@@ -116,6 +118,7 @@ export function makeGlass({ opacity = 0.86 } = {}) {
 
 export function makeStd(name, { color = 0x101010, metalness = 0, roughness = 0.5, wetRough = null, rain = false, emissive = null } = {}) {
   const m = new THREE.MeshStandardNodeMaterial();
+  m.animeRim = 1; // anime look: hard rim light
   m.colorNode = vec3(new THREE.Color(color).r, new THREE.Color(color).g, new THREE.Color(color).b);
   m.metalnessNode = float(metalness);
   if (rain) {
@@ -133,6 +136,7 @@ export function makeStd(name, { color = 0x101010, metalness = 0, roughness = 0.5
 // Light materials driven by instanceColor (r=head, g=tail, b=brake).
 export function makeHeadLight(L = instanceColor) {
   const m = new THREE.MeshStandardNodeMaterial();
+  m.animeRim = 1; // anime look: hard rim light
   m.colorNode = vec3(0.02);
   m.roughnessNode = float(0.1);
   m.metalnessNode = float(0.0);
@@ -144,6 +148,7 @@ export function makeHeadLight(L = instanceColor) {
 
 export function makeTailLight(L = instanceColor) {
   const m = new THREE.MeshStandardNodeMaterial();
+  m.animeRim = 1; // anime look: hard rim light
   m.colorNode = vec3(0.06, 0.0, 0.0);
   m.roughnessNode = float(0.15);
   m.metalnessNode = float(0.0);
@@ -158,6 +163,7 @@ export function makeTailLight(L = instanceColor) {
 
 export function makeTurn(L = instanceColor) {
   const m = new THREE.MeshStandardNodeMaterial();
+  m.animeRim = 1; // anime look: hard rim light
   m.colorNode = vec3(0.3, 0.12, 0.0);
   m.roughnessNode = float(0.2);
   m.emissiveNode = vec3(1.0, 0.42, 0.02).mul(L.y.mul(0.6));
@@ -167,6 +173,7 @@ export function makeTurn(L = instanceColor) {
 
 export function makeAux(kind, L = instanceColor) {
   const m = new THREE.MeshStandardNodeMaterial();
+  m.animeRim = 1; // anime look: hard rim light
   m.colorNode = vec3(0.05);
   m.roughnessNode = float(0.3);
   if (kind === 'taxi') {
@@ -183,6 +190,7 @@ export function makeAux(kind, L = instanceColor) {
 
 export function makePlate(L = instanceColor) {
   const m = new THREE.MeshStandardNodeMaterial();
+  m.animeRim = 1; // anime look: hard rim light
   const p = positionGeometry;
   // faux characters: blocky noise rows on the plate (reads as text at distance)
   const g = vec2(p.x.mul(60.0), p.y.mul(30.0));
@@ -212,7 +220,7 @@ export function buildMaterialSet(type, solo = null) {
     van: { color: 0xc8c8c4, metalness: 0.6, roughness: 0.45 },
     av: { color: 0x202022, metalness: 1, roughness: 0.3 },
   }[type];
-  return {
+  const set = {
     paint: makePaint(paintCfg, solo ? solo.paint : null),
     glass: makeGlass({ opacity: type === 'av' ? 0.78 : 0.86 }),
     chrome: makeStd('chrome', { color: 0xf2f2f4, metalness: 1, roughness: 0.06 }),
@@ -228,6 +236,14 @@ export function buildMaterialSet(type, solo = null) {
     lights_aux: makeAux(type, L),
     lights_turn: makeTurn(L),
   };
+  // anime look: light/dark values designed per material instead of one rule for everything
+  //   animeFloor = lowest irradiance band, animeSpecTh = highlight threshold multiplier (higher = fewer highlights)
+  const design = {
+    paint: [0.12, 0.6], glass: [0.05, 0.5], chrome: [0.16, 0.4], rubber: [0.03, 4], interior: [0.02, 4],
+    trim: [0.05, 0.8], rim: [0.12, 0.5], metal: [0.1, 0.7], caliper: [0.08, 1],
+  };
+  for (const [k, [floor, spec]] of Object.entries(design)) if (set[k]) { set[k].animeFloor = floor; set[k].animeSpecTh = spec; }
+  return set;
 }
 
 // materials whose InstancedMeshes need a per-instance colour

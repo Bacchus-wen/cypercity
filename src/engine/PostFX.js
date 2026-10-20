@@ -1,6 +1,6 @@
 import * as THREE from 'three/webgpu';
 import {
-  pass, mrt, output, normalView, metalness, roughness, velocity, vec2, vec3, vec4, float, uniform,
+  pass, mrt, output, emissive, normalView, metalness, roughness, velocity, vec2, vec3, vec4, float, uniform,
   packNormalToRGB, unpackRGBToNormal, sample, renderOutput, screenUV, time, hash, mix, smoothstep, length,
   max, min, exp, dot, luminance, Fn, clamp, pow, abs, floor, fract, cameraViewMatrix, agxToneMapping, materialReference,
 } from 'three/tsl';
@@ -8,6 +8,7 @@ import { ssr } from 'three/addons/tsl/display/SSRNode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { traa } from 'three/addons/tsl/display/TRAANode.js';
 import { gaussianBlur } from 'three/addons/tsl/display/GaussianBlurNode.js';
+import { ANIME, animeStylize, animeReflection, applyAnimeGrade } from './AnimeLook.js';
 
 // Post-processing pipeline (owned by the atmosphere workstream). HDR linear until renderOutput:
 //   scene MRT (color, normal, metal/rough, velocity)
@@ -41,6 +42,7 @@ export class PostFX {
     };
     renderer.toneMapping = THREE.AgXToneMapping;
     renderer.toneMappingExposure = 1.0;
+    if (ANIME) applyAnimeGrade(this.params);
   }
 
   build() {
@@ -56,8 +58,11 @@ export class PostFX {
     const gbufMRT = mrt({
       output,
       normal: vec4(packNormalToRGB(normalView), opaqueW),
-      metalrough: vec4(metalness, roughness, 0, opaqueW),
-      velocity: vec4(velocity, 0, opaqueW),
+      // b: anime outline mask (material.lineMask, 1 = no inner crease lines)
+      metalrough: vec4(metalness, roughness, ANIME ? materialReference('lineMask', 'float') : float(0), opaqueW),
+      // b (anime look): share of the pixel's luminance that is emitted, so bloom can come from light sources only
+      // (a separate emissive attachment would exceed WebGPU's 32 bytes-per-sample limit for colour attachments)
+      velocity: vec4(velocity, ANIME ? clamp(luminance(emissive).div(max(luminance(output.rgb), 1e-4)), 0, 1) : float(0), opaqueW),
     });
     const keepBlend = new THREE.BlendMode(THREE.NormalBlending);
     gbufMRT.setBlendMode('normal', keepBlend);
@@ -87,18 +92,19 @@ export class PostFX {
     const reflectivity = max(metalRefl, gloss.mul(0.92)).mul(mix(0.3, 1.0, upness));
     const ssrPass = ssr(color, depth, normal, {
       metalnessNode: reflectivity,
-      roughnessNode: rough.mul(0.6),
+      roughnessNode: rough.mul(ANIME ? 0.25 : 0.6), // anime: sharper reflections, posterized below
       reflectNonMetals: true,
       camera,
     });
-    ssrPass.resolutionScale = 0.5;
+    const ssrRes = parseFloat(new URLSearchParams(location.search).get('ssrres')); // debug: ?ssrres=0.5
+    ssrPass.resolutionScale = ssrRes > 0 ? ssrRes : 0.5; // 0.75 costs ~4 fps; the anime reflection uses a depth-guided denoise instead
     ssrPass.quality.value = 0.5;
     ssrPass.maxDistance.value = 140;
     ssrPass.thickness.value = 0.12;
     ssrPass.intensity.value = 1.0;
     ssrPass.maxLuminance.value = 40;
     ssrPass.screenEdgeFade.value = 0.12;
-    ssrPass.blurQuality = 2;
+    ssrPass.blurQuality = ANIME ? 1 : 2;
     this.ssrPass = ssrPass;
     const ssrTex = ssrPass.getTextureNode();
 
@@ -127,20 +133,25 @@ export class PostFX {
     const dbg = (typeof location !== 'undefined' ? new URLSearchParams(location.search).get('pfx') || '' : '').split(',');
     this.dbg = dbg;
     if (dbg.includes('nostreak')) params.streak.value = 0;
-    const lit = dbg.includes('nossr') ? color : color.add(ssrStreak.mul(params.ssrIntensity));
+    const reflection = ANIME ? animeReflection(ssrTex, depth, camera) : ssrStreak;
+    const lit = dbg.includes('nossr') ? color : color.add(reflection.mul(params.ssrIntensity));
 
     // --- atmospheric scattering: light diffuses through rainy air proportional to distance ------------
     const blurred = gaussianBlur(lit, vec2(2.0), 6, { resolutionScale: 0.25 });
     const viewDist = scenePass.getViewZNode().negate();
     const scatterAmt = float(1).sub(exp(viewDist.mul(params.scatterDist).negate())).mul(params.scatter);
-    const atmo = dbg.includes('noscatter') ? lit : mix(lit, blurred, scatterAmt).add(blurred.mul(0.03));
+    const atmo = dbg.includes('noscatter') ? lit : mix(lit, blurred, scatterAmt).add(blurred.mul(ANIME ? 0 : 0.03));
+
+    // --- anime look (?look=anime): paint filter + ink outlines, before TRAA so the lines get anti-aliased -------
+    const styled = ANIME && !dbg.includes('noanime') ? animeStylize({ color: atmo, depthTex: depth, normalTex, metalRough, camera }) : atmo;
 
     // --- TRAA -------------------------------------------------------------------------------------------
-    const aa = traa(atmo, depth, vel, camera);
+    const aa = traa(styled, depth, vel, camera);
+    this.traa = aa;
     const aaTex = aa.getTextureNode();
 
     // --- bloom ------------------------------------------------------------------------------------------
-    const bloomPass = bloom(aa, params.bloomStrength, params.bloomRadius, params.bloomThreshold);
+    const bloomPass = bloom(ANIME ? vec4(styled.rgb.mul(vel.b), 1) : aa, params.bloomStrength, params.bloomRadius, params.bloomThreshold);
     bloomPass.smoothWidth.value = 0.6;
     this.bloomPass = bloomPass;
     const bloomTex = bloomPass.getTextureNode();

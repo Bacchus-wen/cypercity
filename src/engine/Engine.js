@@ -1,6 +1,8 @@
 import * as THREE from 'three/webgpu';
+import { velocity } from 'three/tsl';
 import RAPIER from '@dimforge/rapier3d-compat';
-import { ClusteredLighting } from 'three/addons/lighting/ClusteredLighting.js';
+import { StableClusteredLighting } from './StableClusteredLighting.js';
+import { ANIME, installAnimeLighting } from './AnimeLook.js';
 import { LAYOUT, SHOT_VIEWS } from '../world/layout.js';
 import { Assets } from './Assets.js';
 import { Input } from './Input.js';
@@ -19,13 +21,16 @@ export class Engine {
   }
 
   async init(systems, onProgress = () => {}) {
+    if (ANIME) installAnimeLighting(); // must precede any material build
     const renderer = new THREE.WebGPURenderer({ antialias: false, powerPreference: 'high-performance' });
     renderer.setPixelRatio(this.shot ? 1 : Math.min(window.devicePixelRatio, 1.5));
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.toneMapping = THREE.NoToneMapping; // tone mapping is done in PostFX
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap;
-    renderer.lighting = new ClusteredLighting(); // supports hundreds of point lights (neon, lanterns, street lamps)
+    // Clustered lighting supports hundreds of point lights (neon, lanterns, street lamps). ?lighting=resize restores
+    // three's original node, whose grid (and every lit shader) is rebuilt on each canvas resize.
+    renderer.lighting = new StableClusteredLighting(new URLSearchParams(location.search).get('lighting') === 'resize');
     this.container.appendChild(renderer.domElement);
     await renderer.init();
     if (!renderer.backend.isWebGPUBackend) console.warn('[engine] WebGPU unavailable, running on WebGL2 fallback');
@@ -91,32 +96,128 @@ export class Engine {
     await this.precompile(onProgress);
   }
 
-  // Compile every pipeline the game will use, asynchronously and in parallel, before the first frame.
-  // Pipelines are keyed by render target formats + MRT, so we must compile against the PostFX scene pass (not the
-  // canvas), and with frustum culling off so objects outside the initial view are included too.
+  // Compile every pipeline the game will use, asynchronously, before the first frame.
+  // Pipelines are keyed by render context (target formats + MRT + render call depth), so each pass must be compiled
+  // against the exact context it renders with, and with frustum culling off so objects outside the initial view are
+  // included too. Systems with extra scene passes (river reflection, rain heightfield) compile them in their
+  // precompile(ctx) hook via ctx.engine.compilePass(). (?pc=legacy restores the old single-pass precompile.)
   async precompile(onProgress) {
     const { renderer, scene, camera } = this;
     const t0 = performance.now();
     const sp = this.postfx.scenePass;
+    const legacy = new URLSearchParams(location.search).get('pc') === 'legacy';
+    // Call depth of the scene pass inside the PostFX graph (nested passes, e.g. the river reflector, are one deeper).
+    this.sceneDepth = legacy ? 0 : this._sceneDepth();
+    // The clustered lights node builds its light-culling compute only on its first render, and that compute's cache
+    // key is part of every lit object's cache key (so every object would be rebuilt on the first frame). Build it now
+    // at the real drawing-buffer size so we compile with the keys used at runtime.
+    if (!legacy) renderer.lighting.getNode?.(scene)?.updateProgram?.(renderer);
     const culled = [];
     scene.traverse((o) => { if (o.frustumCulled) { o.frustumCulled = false; culled.push(o); } });
-    const prevRT = renderer.getRenderTarget(), prevMRT = renderer.getMRT();
+    // compileAsync() awaits each GPU pipeline before building the next object's shaders. Collect the pipeline
+    // promises instead so the GPU compiles them on its worker threads while JS keeps building node graphs.
+    const pending = [];
+    const pipes = renderer._pipelines;
+    const getForRender = pipes.getForRender;
+    if (!legacy) pipes.getForRender = function (ro, promises = null) { return getForRender.call(this, ro, promises ? pending : null); };
+    let base = 0;
+    this.compilePass = async (sc, cam, { renderTarget = null, mrt = null, callDepth = 0, label = '', weight = 0 } = {}) => {
+      const b = base; base += weight;
+      await this._compilePass(sc, cam, { renderTarget, mrt, callDepth: legacy ? 0 : callDepth }, (e) => {
+        onProgress(b + weight * (e.total ? e.loaded / e.total : 1), `compiling shaders · ${label} ${e.loaded}/${e.total}`);
+      });
+    };
     try {
-      renderer.setRenderTarget(sp.renderTarget);
-      renderer.setMRT(sp.getMRT());
-      await renderer.compileAsync(scene, camera, null, (e) => onProgress(e.total ? e.loaded / e.total : 1, `compiling shaders ${e.loaded}/${e.total}`));
+      // TRAA points the velocity node at its unjittered projection matrix while the scene pass renders: an extra
+      // uniform in every shader that is not part of the cache key, so it must be the very same matrix object.
+      if (!legacy && this.postfx.traa) velocity.setProjectionMatrix(this.postfx.traa._originalProjectionMatrix);
+      try {
+        await this.compilePass(scene, camera, { renderTarget: sp.renderTarget, mrt: sp.getMRT(), callDepth: this.sceneDepth, label: 'city', weight: 0.6 });
+      } finally {
+        velocity.setProjectionMatrix(null);
+      }
+      if (!legacy) await this.precompileSystems();
+      onProgress(0.98, 'linking shaders');
+      await Promise.all(pending);
     } catch (e) {
       console.warn('[engine] precompile failed', e);
     } finally {
-      renderer.setRenderTarget(prevRT);
-      renderer.setMRT(prevMRT);
+      delete pipes.getForRender;
       for (const o of culled) o.frustumCulled = true;
     }
+    console.log(`[engine] shader precompile ${(performance.now() - t0).toFixed(0)}ms (${pipes.caches.size} pipelines, scene pass depth ${this.sceneDepth})`);
+    this._pipelinesAfterPrecompile = pipes.caches.size;
+  }
+
+  async precompileSystems() {
     for (const s of this.systems) {
       if (s._failed || !s.precompile) continue;
       try { await s.precompile(this.ctx); } catch (e) { console.warn(`[engine] ${s.name}.precompile failed`, e); }
     }
-    console.log(`[engine] shader precompile ${(performance.now() - t0).toFixed(0)}ms`);
+  }
+
+  // Which render call depth does the scene pass run at? It depends on the PostFX node graph (the ?pfx= debug flags
+  // change it). Render one PostFX frame with the scene hidden (only the fullscreen passes and the background draw)
+  // and note the depth at which the scene pass target is bound.
+  _sceneDepth() {
+    const { renderer, scene } = this;
+    const target = this.postfx.scenePass.renderTarget;
+    const contexts = renderer._renderContexts;
+    const get = contexts.get;
+    let depth = null;
+    contexts.get = function (rt, mrt, d = 0) { if (rt === target && depth === null) depth = d; return get.call(this, rt, mrt, d); };
+    const visible = scene.visible;
+    scene.visible = false;
+    try {
+      this.postfx.render();
+    } catch (e) {
+      console.warn('[engine] scene pass depth probe failed', e);
+    } finally {
+      scene.visible = visible;
+      delete contexts.get;
+    }
+    return depth ?? 1;
+  }
+
+  // renderer.compileAsync() always looks up the call-depth-0 render context, but the render context id is part of
+  // every render object's cache key: a pass that renders nested (depth > 0) would rebuild all of its shaders on the
+  // first frame. Point the lookup at the pass's real depth while compileAsync() resolves its context (synchronously,
+  // before its first await).
+  async _compilePass(scene, camera, { renderTarget, mrt, callDepth }, onProgress) {
+    const { renderer } = this;
+    const contexts = renderer._renderContexts;
+    const get = contexts.get;
+    const prevRT = renderer.getRenderTarget(), prevMRT = renderer.getMRT();
+    renderer.setRenderTarget(renderTarget);
+    renderer.setMRT(mrt);
+    contexts.get = function (rt, m) { return get.call(this, rt, m, callDepth); };
+    // With scene.overrideMaterial, renderObject() puts each object's own state (positionNode, alphaTest, side...) on the
+    // shared override material and restores it right after queueing the object, i.e. before compileAsync() builds it.
+    // Queue a snapshot instead so the shader matches what the real pass will build for that object.
+    const override = scene.overrideMaterial;
+    if (override) {
+      const create = renderer._createObjectPipeline;
+      renderer._createObjectPipeline = function (object, material, ...rest) {
+        return create.call(this, object, material === override ? override.clone() : material, ...rest);
+      };
+    }
+    let compiling;
+    try {
+      compiling = renderer.compileAsync(scene, camera, null, onProgress);
+    } finally {
+      delete contexts.get;
+      if (override) delete renderer._createObjectPipeline;
+    }
+    // While compileAsync() walks the objects it runs their nodes' updateBefore hooks, and the river reflector would
+    // really render the whole scene there (at a call depth it never uses at runtime). Its pass is compiled on its own.
+    renderer.render = () => {};
+    try {
+      await compiling;
+    } finally {
+      delete renderer.render;
+      renderer.setRenderTarget(prevRT);
+      renderer.setMRT(prevMRT);
+    }
   }
 
   applyShotView(name) {
@@ -158,6 +259,7 @@ export class Engine {
       this.ctx.input.endFrame();
       this.postfx.render(dt);
       this.frame++;
+      if (this.frame === 5 && this._pipelinesAfterPrecompile) console.log(`[engine] pipelines built after precompile: ${this.renderer._pipelines.caches.size - this._pipelinesAfterPrecompile}`);
       if (this.shot && this.frame === this.shotFrames) window.__shotReady = true;
     });
   }

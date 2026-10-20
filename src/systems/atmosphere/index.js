@@ -3,6 +3,7 @@
 // Post-processing lives in src/engine/PostFX.js (also owned by this workstream).
 import * as THREE from 'three/webgpu';
 import { U, backgroundNode, fogNodeFn, hazeColor } from './atmo.js';
+import { ANIME } from '../../engine/AnimeLook.js';
 import { buildEnvironment } from './environment.js';
 import { createLightShaft } from './lightShaft.js';
 
@@ -18,6 +19,7 @@ export default {
     scene.background = null;
     scene.backgroundNode = backgroundNode();
     scene.fogNode = fogNodeFn();
+    if (ANIME) U.fogDensity.value *= 0.55; // anime look: less violet-grey veil over the distance
 
     try {
       scene.environment = buildEnvironment(renderer);

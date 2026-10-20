@@ -148,6 +148,7 @@ export class VatOutfit {
 
   makeMaterial() {
     const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.7, metalness: 0 });
+    m.animeRim = 1; // anime look: hard rim light
     const posTex = this.posTex, nrmTex = this.nrmTex, W = this.W, R = this.R;
     const iA = attribute('iA', 'vec4'), iB = attribute('iB', 'vec4'), iC = attribute('iC', 'vec4');
     m.positionNode = Fn(() => {

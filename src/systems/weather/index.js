@@ -9,6 +9,7 @@ import { Splashes } from './splashes.js';
 import { Lightning } from './lightning.js';
 import { Drips } from './drips.js';
 import { Steam, steamEmitters } from './steam.js';
+import { ANIME } from '../../engine/AnimeLook.js';
 
 const S = {};
 
@@ -17,6 +18,8 @@ export default {
     const { scene, renderer, camera } = ctx;
     const q = ctx.quality;
     const scale = q === 'low' ? 0.35 : q === 'medium' ? 0.6 : 1.0;
+    // anime look: sparse layered rain lines instead of a continuous curtain (the far sheets are almost gone)
+    const layerScale = ANIME ? { near: 0.6, mid: 0.06, far: 0.03 } : { near: 1, mid: 1, far: 1 };
 
     if (new URLSearchParams(location.search).get('wxtest')) {
       const { buildTestScene } = await import('./testscene.js');
@@ -37,7 +40,7 @@ export default {
     S.splashes = new Splashes(ctx);
     S.rain = new Rain(ctx, {
       heightField: S.hf, lights: S.lights, splashes: S.splashes,
-      nearCount: Math.round(32768 * scale), midCount: Math.round(163840 * scale), farCount: Math.round(131072 * scale),
+      nearCount: Math.round(32768 * scale * layerScale.near), midCount: Math.round(163840 * scale * layerScale.mid), farCount: Math.round(131072 * scale * layerScale.far),
     });
     S.drips = new Drips(ctx, { heightField: S.hf, lights: S.lights, splashes: S.splashes, drips: Math.round(6144 * scale) });
     S.steam = new Steam(ctx, { emitters: steamEmitters(ctx), lights: S.lights, perEmitter: q === 'low' ? 24 : 48 });
@@ -65,6 +68,10 @@ export default {
     };
     S.ctx = ctx;
     window.__weather = S; // debug handle
+  },
+
+  async precompile() {
+    if (!S.off('1')) await S.hf.precompile();
   },
 
   update(dt, t, ctx) {

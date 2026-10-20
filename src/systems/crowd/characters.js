@@ -63,7 +63,7 @@ export class CharacterLibrary {
     const load = async (sex) => {
       const [gltf, meta] = await Promise.all([
         ctx.assets.gltf(`models/crowd/${sex}.glb`),
-        fetch(`/models/crowd/${sex}.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        fetch(`${import.meta.env.BASE_URL}models/crowd/${sex}.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
       ]);
       if (!gltf || !meta) return;
       await this.prepareTextures(meta);
@@ -126,15 +126,22 @@ export class CharacterLibrary {
     const tintU = uniform(new THREE.Color(1, 1, 1)).onObjectUpdate(({ object }) => object.userData.tint);
     if (name === 'umb_clear') {
       m = new THREE.MeshPhysicalNodeMaterial({ color: 0xdfe8f0, roughness: 0.04, metalness: 0, transparent: true, opacity: 0.42, side: THREE.DoubleSide, depthWrite: false });
+      m.animeRim = 1; // anime look: hard rim light
       m.clearcoat = 1; m.clearcoatRoughness = 0.02;
     } else if (glossy) {
       m = new THREE.MeshPhysicalNodeMaterial({ roughness: mm.roughness ?? 0.3, metalness: mm.metalness ?? 0 });
+      m.animeRim = 1; // anime look: hard rim light
       m.clearcoat = mm.coat ?? 0.8; m.clearcoatRoughness = 0.06;
       if (isUmbrella) m.side = THREE.DoubleSide;
     } else {
       m = new THREE.MeshStandardNodeMaterial({ roughness: mm.roughness ?? 0.7, metalness: mm.metalness ?? 0 });
+      m.animeRim = 1; // anime look: hard rim light
     }
     m.name = 'crowd_' + name;
+    // anime look: per-material light/dark design (lowest band, highlight threshold multiplier); hair keeps a highlight
+    const design = name === 'skin' ? [0.14, 3] : kind === 'hair' ? [0.08, 0.7] : isUmbrella ? [0.1, 0.8]
+      : name.startsWith('shoes') || name.startsWith('boots') || name === 'sole' ? [0.06, 1.5] : [0.1, 2];
+    m.animeFloor = design[0]; m.animeSpecTh = design[1];
     let detail = null, detailRep = 1;
     if (fab && !map) {
       detail = this.fabric(fab[0] + '_d.jpg', true, fab[1]); detailRep = fab[1];

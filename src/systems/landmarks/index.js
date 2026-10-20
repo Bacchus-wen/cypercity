@@ -41,7 +41,7 @@ export default {
     const ex = await optional('expressway', () => buildExpressway(ctx, tex, root));
     if (ex) api.expressway = ex.api;
     const river = await optional('river', () => buildRiver(ctx, tex, root));
-    if (river) api.river = river.api;
+    if (river) { api.river = river.api; this.river = river; }
     const trees = await optional('trees', () => buildTrees(ctx, tex, root));
     await optional('props', () => buildProps(ctx, tex, root, trees?.spots || []));
     const br = await optional('bridge', () => buildBridge(ctx, tex, root));
@@ -49,6 +49,22 @@ export default {
     const sky = await optional('skyline', () => buildSkyline(ctx, tex, root));
     if (sky) api.skyline = { towers: sky.towers.map((t) => ({ x: t.x, z: t.z, w: t.w, d: t.d, h: t.h })) };
     ctx.api.landmarks = api;
+  },
+
+  // The river's planar reflection re-renders the whole scene from a mirrored camera, nested inside the scene pass
+  // (one render call deeper), into its own half-float target. Compile that pass up front like the main one; otherwise
+  // its pipelines are built synchronously on the first frame the water is drawn.
+  async precompile(ctx) {
+    const base = this.river?.reflector?.reflector;
+    if (!base || !ctx.engine.compilePass) return;
+    const cam = base.getVirtualCamera(ctx.camera);
+    const water = this.river.water.material;
+    water.visible = false; // the reflector hides its own surface while rendering
+    try {
+      await ctx.engine.compilePass(ctx.scene, cam, { renderTarget: base.getRenderTarget(cam), callDepth: ctx.engine.sceneDepth + 1, label: 'reflections', weight: 0.25 });
+    } finally {
+      water.visible = true;
+    }
   },
 
   update(dt, t, ctx) {

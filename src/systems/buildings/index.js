@@ -24,7 +24,7 @@ async function buildShopAtlas() {
   g.fillStyle = '#808080'; g.fillRect(0, 0, ATLAS_SIZE, ATLAS_SIZE);
   await Promise.all(Object.entries(ATLAS_SOURCES).map(async ([slot, file]) => {
     try {
-      const img = await loadImage(`/textures/buildings/${file}.png`);
+      const img = await loadImage(`${import.meta.env.BASE_URL}textures/buildings/${file}.png`);
       const [x, y, w, h] = SLOTS[slot];
       g.drawImage(img, x, y, w, h);
       img.close?.();
