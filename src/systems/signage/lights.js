@@ -1,6 +1,7 @@
 // Light pool: hundreds of candidate sign/lamp lights, but only the N most relevant to the camera are
 // bound to real PointLights each re-rank (clustered lighting cost stays bounded, per-cluster caps respected).
 import * as THREE from 'three/webgpu';
+import { TOD } from '../../engine/timeOfDay.js';
 
 export function pcg(x) {
   let s = (Math.max(0, Math.trunc(x)) >>> 0);
@@ -75,7 +76,7 @@ export class LightPool {
       l.distance = c.distance;
       let f = flickerJS(c.seed, c.ftype, t);
       if (c.fn) f *= c.fn(t);
-      l.intensity = c.intensity * f;
+      l.intensity = c.intensity * f * TOD.lights;
     }
   }
 }

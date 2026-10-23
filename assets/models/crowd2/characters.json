@@ -1,0 +1,113 @@
+{
+ "version": 1,
+ "note": "Tripo image-to-model -> Tripo rig (mixamo spec, v3.0) -> pipeline/blender/character.py. Clips: clips.glb (tools/strip_clips.py from retarget-char01-v1).",
+ "clips": {
+  "file": "models/crowd2/clips.glb",
+  "source_operation": "retarget-char01-v1",
+  "source_rig_height": 1.0,
+  "cycles": {
+   "walk": 2,
+   "run": 2,
+   "idle": 1
+  },
+  "cycles_note": "loops of the cycle stored in each preset clip (hip-bob minima: walk 4 steps, run 4 steps); the loader keeps one loop"
+ },
+ "characters": [
+  {
+   "id": "char01_courier",
+   "file": "models/crowd2/char01_courier.glb",
+   "height": 1.76,
+   "lod0_tris": 14198,
+   "lod1_tris": 3000,
+   "sha256": "f3e9df080418f20c",
+   "source": {
+    "rig_task": "1de7d0b8-7583-4d64-8ba1-3ff954926091",
+    "operation_id": "rig-char01-v1"
+   }
+  },
+  {
+   "id": "char02_salaryman",
+   "file": "models/crowd2/char02_salaryman.glb",
+   "height": 1.8,
+   "lod0_tris": 14778,
+   "lod1_tris": 3000,
+   "sha256": "d86450b1f0823bf2",
+   "source": {
+    "rig_task": "ed529af4-8724-4220-93fe-ea24e491c34b",
+    "operation_id": "rig-char02_salaryman-v1"
+   }
+  },
+  {
+   "id": "char03_punk",
+   "file": "models/crowd2/char03_punk.glb",
+   "height": 1.74,
+   "lod0_tris": 14500,
+   "lod1_tris": 3000,
+   "sha256": "2c9ede3f950901dc",
+   "source": {
+    "rig_task": "99be307a-3cf6-426d-8676-65fb98e8c006",
+    "operation_id": "rig-char03_punk-v1"
+   }
+  },
+  {
+   "id": "char04_vendor",
+   "file": "models/crowd2/char04_vendor.glb",
+   "height": 1.7,
+   "lod0_tris": 14582,
+   "lod1_tris": 2999,
+   "sha256": "345dc10a9ffbdf26",
+   "source": {
+    "rig_task": "8a9af8d8-8bfe-4b25-9e79-143de53d9f6d",
+    "operation_id": "rig-char04_vendor-v1"
+   }
+  },
+  {
+   "id": "char05_office",
+   "file": "models/crowd2/char05_office.glb",
+   "height": 1.63,
+   "lod0_tris": 14724,
+   "lod1_tris": 2999,
+   "sha256": "f718ea256bfb4006",
+   "source": {
+    "rig_task": "e9a6206c-cd5c-47fe-9727-b8b4a06f3787",
+    "operation_id": "rig-char05_office-v1"
+   }
+  },
+  {
+   "id": "char06_student",
+   "file": "models/crowd2/char06_student.glb",
+   "height": 1.6,
+   "lod0_tris": 14608,
+   "lod1_tris": 3000,
+   "sha256": "a11d222ef81ada12",
+   "source": {
+    "rig_task": "a0f3d042-0bc3-4053-bc38-06c4122878e6",
+    "operation_id": "rig-char06_student-v1"
+   }
+  },
+  {
+   "id": "char07_clubber",
+   "file": "models/crowd2/char07_clubber.glb",
+   "height": 1.62,
+   "lod0_tris": 14834,
+   "lod1_tris": 3000,
+   "sha256": "d602a8014fa191f6",
+   "source": {
+    "rig_task": "0dbd5841-d1ad-40a1-a937-7cc84f080ad5",
+    "operation_id": "rig-char07_clubber-v1"
+   }
+  },
+  {
+   "id": "char08_commuter",
+   "file": "models/crowd2/char08_commuter.glb",
+   "height": 1.66,
+   "lod0_tris": 14276,
+   "lod1_tris": 2999,
+   "sha256": "caeb9810c838ad98",
+   "source": {
+    "rig_task": "974d3ef2-513f-43bd-8cb6-1767ab855565",
+    "operation_id": "rig-char08_commuter-v1"
+   }
+  }
+ ]
+}

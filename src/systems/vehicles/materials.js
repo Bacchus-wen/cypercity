@@ -7,7 +7,9 @@ import * as THREE from 'three/webgpu';
 import {
   float, vec2, vec3, vec4, uniform, time, floor, fract, length, smoothstep, mix, clamp, abs, max, min, normalize, step, sin,
   positionGeometry, normalGeometry, normalView, cameraViewMatrix, instanceColor, dot, pow, positionWorld, cameraPosition,
+  texture, attribute,
 } from 'three/tsl';
+import { recolorNode } from '../../materials/recolor.js';
 import { hash21, hash22, hash23, vnoise } from '../../materials/noise.js';
 import { wetUniforms } from '../../materials/wet.js';
 
@@ -133,6 +135,38 @@ export function makeStd(name, { color = 0x101010, metalness = 0, roughness = 0.5
   return m;
 }
 
+// Textured Tripo car body/wheels (models/vehicles2): flattened albedo + emissive map (neon strips, lamps).
+// `state` is vec4(head, tail, brake, hue): a dedicated instanced attribute for the fleet ('iLight') or uniforms for solo
+// cars. Not instanceColor: three multiplies instanceColor into the diffuse colour, so a light state there would tint
+// or blacken the paint. Emissive texels are classed by car-local position: front 15% = head lamps (follow head),
+// rear 15% = tail lamps (tail, brighter on brake), the rest = decorative neon (dim when parked, full when driving).
+// The zones blend over 0.62..0.72 of the half length (about 14..19% of the car from each end).
+export function makeTex({ map, emissiveMap = null, emissiveIntensity = 1, halfLength = 2.3 }, state) {
+  const m = new THREE.MeshStandardNodeMaterial();
+  m.animeRim = 1; // anime look: hard rim light
+  const rain = rainNodes({ strength: 0.45, streaks: false });
+  const wet = vehUniforms.wet;
+  const hue = state.w;
+  m.colorNode = recolorNode(texture(map).rgb, hue, { keepSkin: false }).mul(mix(float(1), float(0.88), wet));
+  m.metalnessNode = float(0.05);
+  m.roughnessNode = mix(float(0.58), float(0.3), wet).mul(float(1).sub(rain.mask.mul(0.5)));
+  m.normalNode = perturbView(rain.offset, 0.7);
+  if (emissiveMap) {
+    const z = positionGeometry.z; // car-local after the model flip: front = -Z
+    const head = smoothstep(-0.62 * halfLength, -0.72 * halfLength, z);
+    const tail = smoothstep(0.62 * halfLength, 0.72 * halfLength, z);
+    const deco = float(1).sub(head).sub(tail).max(0);
+    const on = head.mul(state.x).add(tail.mul(state.y.mul(0.55).add(state.z.mul(1.3))))
+      .add(deco.mul(max(state.x, state.y).mul(0.65).add(0.35)));
+    // one hue for every lamp class so a continuous neon strip never changes colour where the lamp zone begins;
+    // lamp red stays red
+    const e = recolorNode(texture(emissiveMap).rgb, hue, { keepSkin: false, keepRed: true });
+    m.emissiveNode = e.mul(emissiveIntensity * 2.5).mul(on);
+  }
+  m.name = 'veh_tex';
+  return m;
+}
+
 // Light materials driven by instanceColor (r=head, g=tail, b=brake).
 export function makeHeadLight(L = instanceColor) {
   const m = new THREE.MeshStandardNodeMaterial();
@@ -204,7 +238,7 @@ export function makePlate(L = instanceColor) {
 }
 
 // Build the full material set for one vehicle type.
-export function buildMaterialSet(type, solo = null) {
+export function buildMaterialSet(type, solo = null, tex = null) {
   const L = solo ? solo.light : instanceColor;
   const paintCfg = {
     hero: { metalness: 0.7, roughness: 0.3, flake: 1.0 },
@@ -236,11 +270,12 @@ export function buildMaterialSet(type, solo = null) {
     lights_aux: makeAux(type, L),
     lights_turn: makeTurn(L),
   };
+  if (tex) set.tex = makeTex(tex, solo ? vec4(solo.light, solo.hue) : attribute('iLight', 'vec4'));
   // anime look: light/dark values designed per material instead of one rule for everything
   //   animeFloor = lowest irradiance band, animeSpecTh = highlight threshold multiplier (higher = fewer highlights)
   const design = {
     paint: [0.12, 0.6], glass: [0.05, 0.5], chrome: [0.16, 0.4], rubber: [0.03, 4], interior: [0.02, 4],
-    trim: [0.05, 0.8], rim: [0.12, 0.5], metal: [0.1, 0.7], caliper: [0.08, 1],
+    trim: [0.05, 0.8], rim: [0.12, 0.5], metal: [0.1, 0.7], caliper: [0.08, 1], tex: [0.1, 1.6],
   };
   for (const [k, [floor, spec]] of Object.entries(design)) if (set[k]) { set[k].animeFloor = floor; set[k].animeSpecTh = spec; }
   return set;
@@ -249,3 +284,5 @@ export function buildMaterialSet(type, solo = null) {
 // materials whose InstancedMeshes need a per-instance colour
 export const PAINT_MATS = new Set(['paint']);
 export const LIGHT_MATS = new Set(['lights_head', 'lights_tail', 'lights_turn', 'lights_aux', 'plate']);
+// textured Tripo cars: per-instance vec4(head, tail, brake, hue) in the 'iLight' attribute (see makeTex)
+export const TEX_MATS = new Set(['tex']);

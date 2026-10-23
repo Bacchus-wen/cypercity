@@ -2,7 +2,8 @@
 // procedural neon-city PMREM environment, weak cool ambient, lightning response, light-shaft helper.
 // Post-processing lives in src/engine/PostFX.js (also owned by this workstream).
 import * as THREE from 'three/webgpu';
-import { U, backgroundNode, fogNodeFn, hazeColor } from './atmo.js';
+import { U, SKY, backgroundNode, paintedBackgroundNode, fogNodeFn, hazeColor } from './atmo.js';
+import { TOD_PRESET } from '../../engine/timeOfDay.js';
 import { ANIME } from '../../engine/AnimeLook.js';
 import { buildEnvironment } from './environment.js';
 import { createLightShaft } from './lightShaft.js';
@@ -16,10 +17,24 @@ export default {
   async init(ctx) {
     const { scene, renderer } = ctx;
 
+    // time-of-day preset (restyle): haze / sky colours, painted sky, ambient, sun - applied before the PMREM
+    // environment is rendered, which samples the same haze function
+    const T = TOD_PRESET;
+    if (T) {
+      for (const [k, val] of Object.entries(T.atmo)) if (U[k] && val?.isVector3) U[k].value.copy(val);
+      U.cloudCover.value = T.atmo.cloudCover;
+      const S = T.sky;
+      for (const k of ['cloudShadow', 'cloudBody', 'cloudLight', 'outline', 'outlineInner']) SKY[k].value.copy(S[k]);
+      SKY.stars.value = S.stars;
+      SKY.bodyDir.value.copy(S.body.dir).normalize(); SKY.bodyColor.value.copy(S.body.color); SKY.bodySize.value = S.body.size;
+      SKY.bodyGlow.value.copy(S.body.glow); SKY.bodyIsSun.value = S.body.kind === 'sun' ? 1 : 0;
+    }
     scene.background = null;
-    scene.backgroundNode = backgroundNode();
+    scene.backgroundNode = T ? paintedBackgroundNode() : backgroundNode();
     scene.fogNode = fogNodeFn();
-    if (ANIME) U.fogDensity.value *= 0.55; // anime look: less violet-grey veil over the distance
+    if (ANIME) U.fogDensity.value *= T ? T.atmo.fogDensityMul : 0.55; // anime look: less veil over the distance
+    BASE.envIntensity = T ? T.env : BASE.envIntensity;
+    BASE.hemi = T ? T.hemi.intensity : BASE.hemi;
 
     try {
       scene.environment = buildEnvironment(renderer);
@@ -29,9 +44,17 @@ export default {
     }
 
     // weak cool sky / dark warm ground ambient
-    this.hemi = new THREE.HemisphereLight(0x4a5a9a, 0x1a1020, BASE.hemi);
+    this.hemi = new THREE.HemisphereLight(T ? T.hemi.sky : 0x4a5a9a, T ? T.hemi.ground : 0x1a1020, BASE.hemi);
     this.hemi.name = 'atmo.hemi';
     scene.add(this.hemi);
+    // low sun (dusk preset): no shadow map, the cel terminator gives the lit / unlit split
+    if (T?.sun) {
+      this.sun = new THREE.DirectionalLight(T.sun.color, T.sun.intensity);
+      this.sun.name = 'atmo.sun';
+      this.sun.position.copy(T.sun.dir).multiplyScalar(500);
+      this.sun.target.position.set(0, 0, 0);
+      scene.add(this.sun, this.sun.target);
+    }
 
     this.ctx = ctx;
     // debug: ?atmoflash=0.8 forces a lightning flash level (for tuning screenshots)

@@ -10,6 +10,8 @@ import {
 import { U, makeLightFn, mulberry32, softClamp } from './common.js';
 import { MAX_LIGHTS } from './lights.js';
 
+const ANIME_STEAM = typeof location !== 'undefined' && new URLSearchParams(location.search).get('look') === 'anime';
+
 // CPU-generated 2x2 atlas of soft billowy puffs (tileable value-noise fbm masked by radial falloff)
 function makePuffAtlas(size = 256) {
   const rng = mulberry32(777);
@@ -110,7 +112,9 @@ export class Steam {
       const world = center.add(right.mul(gx.mul(size))).add(up.mul(gy.mul(size)));
       const fadeIn = smoothstep(0.0, select(isMist, float(0.3), float(0.08)), phase);
       const fadeOut = pow(float(1).sub(phase), select(isMist, float(1.0), float(1.3)));
-      const nearFade = smoothstep(0.4, 2.5, dist.sub(size.mul(0.3)));
+      // (anime look: puffs right in front of the camera are flattened into solid pale shapes by the paint filter, so
+      //  they fade out within ~9 m and are a bit thinner overall)
+      const nearFade = ANIME_STEAM ? smoothstep(1.5, 9.0, dist.sub(size.mul(0.3))).mul(0.7) : smoothstep(0.4, 2.5, dist.sub(size.mul(0.3)));
       vA.assign(fadeIn.mul(fadeOut).mul(b.w).mul(nearFade));
       const lit = softClamp(lightAt(center, f).mul(0.06), 0.8);
       vC.assign(U.ambient.mul(3.0).add(vec3(0.05, 0.055, 0.07)).add(lit).add(vec3(0.5, 0.55, 0.7).mul(U.lightning.mul(1.5))));

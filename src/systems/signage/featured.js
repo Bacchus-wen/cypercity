@@ -1,5 +1,6 @@
 // Hand-placed hero signage matching the reference panels (ramen shop, karaoke blade, overlook NEON, alley set).
 import * as THREE from 'three/webgpu';
+import { ART_RESTYLE } from '../restyleArt.js';
 import { NEON } from './util.js';
 import { alleyGroundY } from './facades.js';
 
@@ -49,7 +50,7 @@ export async function buildFeatured(ctx, sb, facades, L) {
     // second neon blade higher up
     sb.blade(ramenF, aa + 3.4, base + 7.5, byText(L.neonV, '居酒屋'), { depth: 1.0, maxH: 6, tint: NEON.amber, ftype: 0, importance: 2 });
     // noren-level fascia
-    sb.flat(ramenF, aa, base + 3.25, byText(L.boxH, 'ラーメン 一番'), { width: 5.2, maxH: 0.9, depth: 0.25, inten: 2.0, importance: 2 });
+    sb.flat(ramenF, aa, base + 3.25, byText(L.boxH, '麺屋 黒潮'), { width: 5.2, maxH: 0.9, depth: 0.25, inten: 2.0, importance: 2 });
     // lantern row under the awning line
     const p0 = ramenF.center.clone().addScaledVector(ramenF.right, aa - 2.2).addScaledVector(ramenF.normal, 0.7); p0.y = base + 2.95;
     const p1 = ramenF.center.clone().addScaledVector(ramenF.right, aa + 2.6).addScaledVector(ramenF.normal, 0.7); p1.y = base + 2.95;
@@ -111,7 +112,8 @@ export async function buildFeatured(ctx, sb, facades, L) {
     const sag = 0.5;
     const a = new THREE.Vector3(x, gy + 4.3, al.z - al.width / 2 + 0.1);
     const b = new THREE.Vector3(x - 1.5, gy + 4.5, al.z + al.width / 2 - 0.1);
-    lanternStrings.push({ a, b, sag, count: 4 });
+    // (restyle: lanterns stay as a Japantown accent at the alley entrance only, not strung along the whole alley)
+    if (!ART_RESTYLE || x > al.xStart - 8) lanternStrings.push({ a, b, sag, count: 4 });
   }
   for (const f of alleyF) {
     if (sb.rnd() < 0.5) {
@@ -119,7 +121,8 @@ export async function buildFeatured(ctx, sb, facades, L) {
       const a = sb.rnd.range(-f.width / 3, f.width / 3);
       const p0 = f.center.clone().addScaledVector(f.right, a - 0.6).addScaledVector(f.normal, 0.45); p0.y = base + 2.5;
       const p1 = f.center.clone().addScaledVector(f.right, a + 0.6).addScaledVector(f.normal, 0.45); p1.y = base + 2.5;
-      lanternRows.push({ p0, p1, count: 2, texts: sb.rnd() < 0.5 ? ['居', '酒'] : ['焼鳥', '酒'], scale: 0.9 });
+      const texts = sb.rnd() < 0.5 ? ['居', '酒'] : ['焼鳥', '酒'];
+      if (!ART_RESTYLE || sb.rnd() < 0.35) lanternRows.push({ p0, p1, count: 2, texts, scale: 0.9 });
     }
   }
   sb.lightScale = 1;

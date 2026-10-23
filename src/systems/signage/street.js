@@ -1,10 +1,12 @@
 // Street furniture lighting: street lamps, traffic + pedestrian signals (animated), P parking sign, road signs,
 // alley utility poles with lamps. Static parts are merged into the shared housing batch; lenses into the face batch.
 import * as THREE from 'three/webgpu';
+import { ART_RESTYLE } from '../restyleArt.js';
 import { attribute, uniform, float, vec3, vec2, texture, uv, select, step, fract, floor, mix } from 'three/tsl';
 import { uTime } from './materials.js';
 import { alleyGroundY } from './facades.js';
 import { nearestFacade, makeFacade } from './featured.js';
+import { propGltf } from '../propModels.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -38,7 +40,7 @@ function pedState(phase, t) { // 0 walk, 1 blink, 2 stop
 
 export async function buildStreet(ctx, sb, L) {
   const { assets, layout, scene } = ctx;
-  const [gL, gT, gP, gU] = await Promise.all(['streetlamp', 'traffic_signal', 'ped_signal', 'utility_pole'].map((n) => assets.gltf(`models/signage/${n}.glb`)));
+  const [gL, gT, gP, gU] = await Promise.all(['streetlamp', 'traffic_signal', 'ped_signal', 'utility_pole'].map((n) => propGltf(assets, 'signage', n)));
   const SL = parts(gL), TS = parts(gT), PS = parts(gP), UP_ = parts(gU);
   const groundY = (x, z) => { try { const h = ctx.api.ground?.heightAt?.(x, z); return Number.isFinite(h) ? h : null; } catch { return null; } };
   const physics = ctx.physics;
@@ -57,7 +59,7 @@ export async function buildStreet(ctx, sb, L) {
     const col = warm ? [1.0, 0.62, 0.3] : [0.85, 0.92, 1.0];
     each(SL.lens, (g, mw) => sb.F.geometry(g, m4.clone().multiply(mw), { tint: col, sp: [2, 9, 0, 0], back: [0, 0, 0] }));
     const lp = new THREE.Vector3(2.2, 7.75, 0).applyAxisAngle(UP, yaw).add(new THREE.Vector3(x, y, z));
-    sb.light(lp, col, 55, 22, 0, 0, 1.4);
+    sb.light(lp, col, ART_RESTYLE ? 34 : 55, 22, 0, 0, 1.4); // (restyle: softer pools, no hard white eggs on the road)
     collider(x, y, z, 4, 0.13);
   };
   const nearCross = (z, pad) => cs.zs.some((c) => Math.abs(z - c) < cs.roadHalfWidth + cs.sidewalkWidth + pad);

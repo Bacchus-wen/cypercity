@@ -1,0 +1,60 @@
+<!doctype html>
+<!-- Dev-only check: do clips retargeted by Tripo onto one rig play correctly on the other Tripo (Mixamo-spec) rigs?
+     Rotation tracks are shared as-is; the Hips translation track becomes a delta from the source rest pose, scaled by
+     the ratio of hip heights. Open /test/clipshare.html?clip=walk&t=0.3 -->
+<html><head><meta charset="utf-8"><style>body{margin:0;background:#bbb}canvas{display:block}</style></head>
+<body><script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+const qs = new URLSearchParams(location.search);
+const clipName = qs.get('clip') || 'walk', tNorm = parseFloat(qs.get('t') || '0.3');
+const W = 1600, H = 560;
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(W, H); renderer.outputColorSpace = THREE.SRGBColorSpace; document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0xbbbbbb);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x666666, 2.2));
+const dl = new THREE.DirectionalLight(0xffffff, 1.5); dl.position.set(2, 4, 3); scene.add(dl);
+const cam = new THREE.PerspectiveCamera(30, W / H, 0.1, 100);
+const loader = new GLTFLoader();
+const load = (u) => new Promise((res, rej) => loader.load(u, res, undefined, rej));
+
+function hipsOf(root) { let h = null; root.traverse((o) => { if (o.isBone && /Hips$/.test(o.name)) h = h || o; }); return h; }
+
+// Convert a source clip for a target skeleton: keep quaternions, Hips position -> delta * ratio + target rest.
+function adaptClip(clip, srcHips, dstHips) {
+  const srcRest = srcHips.position.clone(), dstRest = dstHips.position.clone();
+  const ratio = dstRest.y / srcRest.y;
+  const tracks = [];
+  for (const tr of clip.tracks) {
+    if (tr.name.endsWith('.quaternion')) { tracks.push(tr); continue; }
+    if (tr.name === srcHips.name + '.position') {
+      const v = tr.values.slice();
+      for (let i = 0; i < v.length; i += 3) {
+        v[i] = dstRest.x + (v[i] - srcRest.x) * ratio;
+        v[i + 1] = dstRest.y + (v[i + 1] - srcRest.y) * ratio;
+        v[i + 2] = dstRest.z + (v[i + 2] - srcRest.z) * ratio;
+      }
+      tracks.push(new THREE.VectorKeyframeTrack(dstHips.name + '.position', tr.times, v));
+    }
+  }
+  return new THREE.AnimationClip(clip.name, clip.duration, tracks);
+}
+
+const src = await load('/_test/clips_char01.glb');
+const srcHips = hipsOf(src.scene);
+const clip = src.animations.find((c) => c.name === clipName);
+const names = ['char01_courier', 'char02_salaryman', 'char03_punk', 'char04_vendor'];
+const mixers = [];
+let x = 0;
+for (const n of names) {
+  const g = await load(`/_test/rig_${n}.glb`);
+  const root = g.scene; root.position.x = x; x += 0.7;
+  scene.add(root);
+  const mixer = new THREE.AnimationMixer(root);
+  const a = mixer.clipAction(adaptClip(clip, srcHips, hipsOf(root)));
+  a.play(); mixer.setTime(clip.duration * tNorm); mixers.push(mixer);
+}
+cam.position.set(x / 2 - 0.35, 0.55, 3.4); cam.lookAt(x / 2 - 0.35, 0.48, 0);
+renderer.render(scene, cam);
+window.__ready = true;
+</script></body></html>

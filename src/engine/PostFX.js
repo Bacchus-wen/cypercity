@@ -58,8 +58,9 @@ export class PostFX {
     const gbufMRT = mrt({
       output,
       normal: vec4(packNormalToRGB(normalView), opaqueW),
-      // b: anime outline mask (material.lineMask, 1 = no inner crease lines)
-      metalrough: vec4(metalness, roughness, ANIME ? materialReference('lineMask', 'float') : float(0), opaqueW),
+      // b (anime look): 0.5 * lineMask (1 = no inner crease lines) + 0.25 * figure (animeRim: characters, vehicles and
+      // props are authored flat, so the Kuwahara paint filter skips them); decoded in AnimeLook.animeStylize
+      metalrough: vec4(metalness, roughness, ANIME ? materialReference('lineMask', 'float').mul(0.5).add(materialReference('animeRim', 'float').mul(0.25)) : float(0), opaqueW),
       // b (anime look): share of the pixel's luminance that is emitted, so bloom can come from light sources only
       // (a separate emissive attachment would exceed WebGPU's 32 bytes-per-sample limit for colour attachments)
       velocity: vec4(velocity, ANIME ? clamp(luminance(emissive).div(max(luminance(output.rgb), 1e-4)), 0, 1) : float(0), opaqueW),

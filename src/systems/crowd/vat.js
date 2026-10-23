@@ -5,10 +5,11 @@
 import * as THREE from 'three/webgpu';
 import {
   Fn, attribute, vertexIndex, int, ivec2, float, vec3, vec4, floor, mod, mix, cos, sin, textureLoad, normalLocal,
-  clamp, normalWorld, uniform, max,
+  clamp, normalWorld, uniform, max, texture, uv,
 } from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CROWD_U } from './characters.js';
+import { recolorNode } from '../../materials/recolor.js';
 
 // far clips: name -> frames sampled per cycle
 export const VAT_CLIPS = { walk: 16, umbrella_walk: 16, idle: 28, phone_idle: 20, umbrella_idle: 20 };
@@ -19,6 +20,7 @@ export const VAT_MAP = {
 };
 
 function toHalf(v) { return THREE.DataUtils.toHalfFloat(v); }
+const _hp = new THREE.Vector3(), _hp2 = new THREE.Vector3(), _hq = new THREE.Quaternion(), _hq2 = new THREE.Quaternion(), _hs = new THREE.Vector3();
 
 export class VatOutfit {
   /**
@@ -33,7 +35,8 @@ export class VatOutfit {
     // merged geometry: position, normal, color (vertex colour baked in Blender, alpha = emissive mask), skin attrs
     const geos = meshes.map((m) => {
       const g = m.geometry.clone();
-      for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'color', 'skinIndex', 'skinWeight'].includes(k)) g.deleteAttribute(k);
+      const keep = ['position', 'normal', 'color', 'skinIndex', 'skinWeight', ...(entry.vatMap ? ['uv'] : [])];
+      for (const k of Object.keys(g.attributes)) if (!keep.includes(k)) g.deleteAttribute(k);
       if (!g.attributes.color) {
         const n = g.attributes.position.count; const c = new Float32Array(n * 4).fill(0.5); g.setAttribute('color', new THREE.BufferAttribute(c, 4));
       }
@@ -76,14 +79,17 @@ export class VatOutfit {
     const bind = mesh0.bindMatrix, bindInv = mesh0.bindMatrixInverse;
     const boneM = new Float32Array(bones.length * 16);
     const tmp = new THREE.Matrix4();
-    this.handMats = {}; // clip -> Float32Array(frames*16) hand_r transform in model space (for far umbrellas)
-    const handIdx = bones.findIndex((b) => b.name === 'hand_r');
+    this.handMats = {}; // clip -> Float32Array(frames*7) hand transform in model space as position + quaternion (far umbrellas)
+    const handIdx = bones.findIndex((b) => b.name === (entry.handBone || 'hand_r'));
+    // with entry.handAttach the umbrella geometry is local to the umbrella frame: model = bindInv * handWorld * attach;
+    // otherwise (legacy) it is skinned to the hand in bind space and the skinning matrix is used
+    const attach = entry.handAttach || null, handT = new THREE.Matrix4();
     for (const [name, cr] of Object.entries(clipRows)) {
       const clip = entry.clips[name];
       const action = mixer.clipAction(clip);
       mixer.stopAllAction();
       action.reset().play(); action.setEffectiveWeight(1);
-      const hm = new Float32Array(cr.frames * 16);
+      const hm = new Float32Array(cr.frames * 7);
       for (let f = 0; f < cr.frames; f++) {
         action.time = (f / cr.frames) * clip.duration;
         mixer.update(0);
@@ -94,7 +100,12 @@ export class VatOutfit {
           tmp.premultiply(bindInv).multiply(bind);
           tmp.toArray(boneM, b * 16);
         }
-        if (handIdx >= 0) { tmp.fromArray(boneM, handIdx * 16); tmp.toArray(hm, f * 16); }
+        if (handIdx >= 0) {
+          if (attach) handT.multiplyMatrices(bindInv, bones[handIdx].matrixWorld).multiply(attach);
+          else handT.fromArray(boneM, handIdx * 16);
+          handT.decompose(_hp, _hq, _hs);
+          _hp.toArray(hm, f * 7); _hq.toArray(hm, f * 7 + 3);
+        }
         const rowBase = (cr.start + f) * R * W;
         for (let v = 0; v < nV; v++) {
           const x = P[v * 3], y = P[v * 3 + 1], z = P[v * 3 + 2];
@@ -131,9 +142,11 @@ export class VatOutfit {
     ig.setAttribute('position', geo.attributes.position);
     ig.setAttribute('normal', geo.attributes.normal);
     ig.setAttribute('color', geo.attributes.color);
+    if (entry.vatMap && geo.attributes.uv) ig.setAttribute('uv', geo.attributes.uv);
+    this.map = entry.vatMap && geo.attributes.uv ? entry.vatMap : null;
     this.iA = new THREE.InstancedBufferAttribute(new Float32Array(maxInstances * 4), 4); // xyz pos, yaw
     this.iB = new THREE.InstancedBufferAttribute(new Float32Array(maxInstances * 4), 4); // frame, start, frames, scale
-    this.iC = new THREE.InstancedBufferAttribute(new Float32Array(maxInstances * 4), 4); // tint rgb, unused
+    this.iC = new THREE.InstancedBufferAttribute(new Float32Array(maxInstances * 4), 4); // tint rgb, hue variant (textured)
     this.iA.setUsage(THREE.DynamicDrawUsage); this.iB.setUsage(THREE.DynamicDrawUsage); this.iC.setUsage(THREE.DynamicDrawUsage);
     ig.setAttribute('iA', this.iA); ig.setAttribute('iB', this.iB); ig.setAttribute('iC', this.iC);
     ig.instanceCount = 0;
@@ -171,6 +184,14 @@ export class VatOutfit {
     const col = attribute('color', 'vec4');
     const up = clamp(normalWorld.y.mul(0.6).add(0.55), 0, 1);
     const wet = CROWD_U.wetness.mul(up);
+    if (this.map) {
+      // textured characters (crowd2): same albedo texture as the near LOD, mild per-instance brightness
+      m.animeFloor = 0.1; m.animeSpecTh = 2;
+      m.lineMask = 1; // far figures are a few pixels tall: silhouette ink only, no inner crease lines
+      m.colorNode = vec4(recolorNode(texture(this.map, uv()).rgb, iC.a).mul(iC.rgb).mul(float(1).sub(wet.mul(0.22))), 1);
+      m.roughnessNode = mix(float(0.62), float(0.38), wet);
+      return m;
+    }
     m.colorNode = vec4(col.rgb.mul(iC.rgb).mul(float(1).sub(wet.mul(0.25))), 1);
     m.roughnessNode = mix(float(0.72), float(0.4), wet);
     m.emissiveNode = col.rgb.mul(col.a).mul(2.5);
@@ -179,23 +200,26 @@ export class VatOutfit {
 
   begin() { this.count = 0; }
 
-  push(x, y, z, yaw, clip, time, scale, tint) {
+  push(x, y, z, yaw, clip, time, scale, tint, hue = 0) {
     if (this.count >= this.max) return false;
     const cr = this.clipRows[clip] || this.clipRows.walk;
     const i = this.count++;
     const A = this.iA.array, B = this.iB.array, Cc = this.iC.array;
     A[i * 4] = x; A[i * 4 + 1] = y; A[i * 4 + 2] = z; A[i * 4 + 3] = yaw;
     B[i * 4] = time * cr.frames; B[i * 4 + 1] = cr.start; B[i * 4 + 2] = cr.frames; B[i * 4 + 3] = scale;
-    Cc[i * 4] = tint[0]; Cc[i * 4 + 1] = tint[1]; Cc[i * 4 + 2] = tint[2];
+    Cc[i * 4] = tint[0]; Cc[i * 4 + 1] = tint[1]; Cc[i * 4 + 2] = tint[2]; Cc[i * 4 + 3] = hue;
     return true;
   }
 
-  // hand_r transform (model space) for far umbrellas, interpolated to nearest frame
+  // hand transform (model space) for far umbrellas, interpolated between baked frames exactly like the body (iB.x)
   handMatrix(clip, time, out) {
     const hm = this.handMats[clip]; const cr = this.clipRows[clip];
     if (!hm) return null;
-    const f = Math.floor(((time % 1) + 1) % 1 * cr.frames) % cr.frames;
-    return out.fromArray(hm, f * 16);
+    const ft = (((time % 1) + 1) % 1) * cr.frames;
+    const f0 = Math.floor(ft) % cr.frames, f1 = (f0 + 1) % cr.frames, a = ft - Math.floor(ft);
+    _hp.fromArray(hm, f0 * 7).lerp(_hp2.fromArray(hm, f1 * 7), a);
+    _hq.fromArray(hm, f0 * 7 + 3).slerp(_hq2.fromArray(hm, f1 * 7 + 3), a);
+    return out.compose(_hp, _hq, _hs.set(1, 1, 1));
   }
 
   end() {

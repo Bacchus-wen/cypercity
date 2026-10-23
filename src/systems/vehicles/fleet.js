@@ -3,12 +3,20 @@
 // cars that pass CPU frustum culling, with distance-based LOD selection.
 import * as THREE from 'three/webgpu';
 import { uniform } from 'three/tsl';
-import { buildMaterialSet, PAINT_MATS, LIGHT_MATS } from './materials.js';
+import { buildMaterialSet, PAINT_MATS, LIGHT_MATS, TEX_MATS } from './materials.js';
 
 const _m = new THREE.Matrix4(), _w = new THREE.Matrix4(), _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion();
 const _v = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1), _c = new THREE.Color();
 const _sphere = new THREE.Sphere(), _frustum = new THREE.Frustum(), _pm = new THREE.Matrix4();
 const AX = new THREE.Vector3(1, 0, 0), AY = new THREE.Vector3(0, 1, 0);
+// colour variants for textured cars (radians, applied to saturated texels); about a third keep the designed colours
+const CAR_HUES = [0, 0, 0, 2.1, -2.1, 1.05, -1.05, 3.14, 0.55, -0.55];
+export function carHue(c) {
+  if (c.hue != null) return c.hue;
+  const p = c.paint || _c.setRGB(0, 0, 0);
+  const h = Math.imul(Math.round(p.r * 255) * 73856093 ^ Math.round(p.g * 255) * 19349663 ^ Math.round(p.b * 255) * 83492791 ^ (c.id ?? 0), 2654435761) >>> 0;
+  return (c.hue = CAR_HUES[h % CAR_HUES.length]);
+}
 
 export class Fleet {
   constructor(scene, models, capacity) {
@@ -21,13 +29,23 @@ export class Fleet {
     this.maxLod0 = 4;
     for (const type in models) {
       const M = models[type];
-      const mats = buildMaterialSet(type);
+      const mats = buildMaterialSet(type, null, M.tex);
       this.mats[type] = mats;
       const cap = Math.max(1, capacity[type] || 0);
       this.sets[type] = M.lods.map((L, lod) => {
         const mk = (geom, matName, count) => {
           const mat = mats[matName] || mats.trim;
-          const mesh = new THREE.InstancedMesh(geom, mat, count);
+          let g = geom;
+          if (TEX_MATS.has(matName)) {
+            // own geometry wrapper (attributes shared with the solo meshes) carrying the per-instance light/hue state
+            g = new THREE.BufferGeometry();
+            for (const [k, v] of Object.entries(geom.attributes)) g.setAttribute(k, v);
+            g.index = geom.index; g.boundingSphere = geom.boundingSphere; g.boundingBox = geom.boundingBox;
+            const iLight = new THREE.InstancedBufferAttribute(new Float32Array(count * 4), 4);
+            iLight.setUsage(THREE.DynamicDrawUsage);
+            g.setAttribute('iLight', iLight);
+          }
+          const mesh = new THREE.InstancedMesh(g, mat, count);
           mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
           if (PAINT_MATS.has(matName) || LIGHT_MATS.has(matName)) {
             mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(count * 3).fill(1), 3);
@@ -55,8 +73,8 @@ export class Fleet {
   // (InstancedMesh has none -> ghosting on fast cars), full LOD0 detail, per-car uniforms.
   makeSolo(type) {
     const M = this.models[type];
-    const solo = { paint: uniform(new THREE.Color(1, 1, 1)), light: uniform(new THREE.Vector3(1, 1, 0)) };
-    const mats = buildMaterialSet(type, solo);
+    const solo = { paint: uniform(new THREE.Color(1, 1, 1)), light: uniform(new THREE.Vector3(1, 1, 0)), hue: uniform(0) };
+    const mats = buildMaterialSet(type, solo, M.tex);
     const g = new THREE.Group(); g.name = 'veh_solo_' + type;
     for (const p of M.lods[0].parts) {
       const m = new THREE.Mesh(p.geom, mats[p.mat] || mats.trim);
@@ -86,6 +104,7 @@ export class Fleet {
     S.g.position.copy(c.pos); S.g.quaternion.copy(c.quat);
     S.solo.paint.value.copy(c.paint);
     S.solo.light.value.copy(c.light);
+    S.solo.hue.value = carHue(c);
     const M = this.models[c.type];
     M.slots.forEach((sl, w) => {
       const W = S.wheels[w];
@@ -160,11 +179,15 @@ export class Fleet {
       const n = s.hi;
       for (const mesh of s.body) {
         mesh.count = n; mesh.visible = n > 0;
-        if (n) { mesh.instanceMatrix.needsUpdate = true; if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true; }
+        if (n) {
+          mesh.instanceMatrix.needsUpdate = true;
+          if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+          const il = mesh.geometry.attributes.iLight; if (il) il.needsUpdate = true;
+        }
       }
       for (const mesh of s.wheel) {
         mesh.count = n * 4; mesh.visible = n > 0;
-        if (n) mesh.instanceMatrix.needsUpdate = true;
+        if (n) { mesh.instanceMatrix.needsUpdate = true; const il = mesh.geometry.attributes.iLight; if (il) il.needsUpdate = true; }
       }
     }
     return list;
@@ -184,6 +207,8 @@ export class Fleet {
         if (mesh.userData.matName === 'paint') mesh.setColorAt(i, c.paint);
         else { _c.setRGB(c.light.x, c.light.y, c.light.z); mesh.setColorAt(i, _c); }
       }
+      const il = mesh.geometry.attributes.iLight;
+      if (il) il.setXYZW(i, c.light.x, c.light.y, c.light.z, carHue(c));
     }
     if (set.wheel.length) {
       const M = this.models[c.type];
@@ -195,7 +220,11 @@ export class Fleet {
         _v.copy(sl.pos); if (c.susp) _v.y += c.susp[w] || 0;
         _w.compose(_v, _q, _s);
         _w.premultiply(_m);
-        for (const mesh of set.wheel) mesh.setMatrixAt(i * 4 + w, _w);
+        for (const mesh of set.wheel) {
+          mesh.setMatrixAt(i * 4 + w, _w);
+          const il = mesh.geometry.attributes.iLight; // same light/hue state as the body (and the solo renderer)
+          if (il) il.setXYZW(i * 4 + w, c.light.x, c.light.y, c.light.z, carHue(c));
+        }
       }
     }
   }

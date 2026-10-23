@@ -2,6 +2,7 @@
 // fake additive headlight beams + ground pools for all ground cars (instanced), blinking nav lights for flying AVs,
 // and real SpotLights (no shadows) for the hero / driven car.
 import * as THREE from 'three/webgpu';
+import { TOD } from '../../engine/timeOfDay.js';
 import {
   float, vec2, vec3, vec4, uv, smoothstep, length, mix, clamp, instanceIndex, time, fract, sin, step, positionGeometry, abs,
   normalView, positionView, normalize, dot, pow, instanceColor, max, hash, cameraPosition, positionWorld,
@@ -9,6 +10,13 @@ import {
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _m = new THREE.Matrix4(), _q = new THREE.Quaternion();
 const _s1 = new THREE.Vector3(1, 1, 1);
+
+// head PointLights of the nearest cars: in the anime look their wet-road highlights are drawn as hard shapes, which at
+// full strength read as solid white eggs on the road; softer there, and scaled by the time of day (dusk ~30%)
+const ANIME_V = typeof location !== 'undefined' && new URLSearchParams(location.search).get('look') === 'anime';
+const HEAD_I = ANIME_V ? 0.7 * Math.max(0.3, TOD.lights) : 9;
+const TAIL_K = ANIME_V ? 0.35 : 1;
+const SPOT_I = ANIME_V ? 90 * Math.max(0.3, TOD.lights) : 260; // hero / nearest car spotlights, same reason
 
 export class VehicleLights {
   constructor(scene, models, { tailCount = 28, headCount = 14, beamCap = 220, navCap = 200 } = {}) {
@@ -54,7 +62,8 @@ export class VehicleLights {
     const edge = pow(clamp(abs(dot(nv, vdir)), 0, 1), 1.6);
     const camD = length(positionWorld.sub(cameraPosition));
     const distFade = smoothstep(260.0, 60.0, camD).mul(smoothstep(1.5, 6.0, camD));
-    bm.colorNode = vec3(1.0, 0.86, 0.66).mul(along.pow(2.2)).mul(edge).mul(distFade).mul(instanceColor.x).mul(0.05);
+    // (scaled by the time-of-day window/light level: full at night, about a third at dusk)
+    bm.colorNode = vec3(1.0, 0.86, 0.66).mul(along.pow(2.2)).mul(edge).mul(distFade).mul(instanceColor.x).mul(0.05).mul(TOD.windows);
     this.beams = new THREE.InstancedMesh(beamGeo, bm, beamCap);
     this.beams.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(beamCap * 3).fill(1), 3);
     this.beams.frustumCulled = false; this.beams.count = 0; this.beams.renderOrder = 5;
@@ -64,9 +73,11 @@ export class VehicleLights {
     const pm = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
     pm.fog = false;
     const pu = uv().sub(vec2(0.5, 0.15)).mul(vec2(2.0, 1.1));
-    const pf = smoothstep(1.0, 0.0, length(pu)).pow(1.8);
+    // softer falloff and lower peak: the old pools read as hard-edged pale eggs on the road after the cel grade;
+    // scaled by the time of day (at dusk headlight pools are barely visible)
+    const pf = smoothstep(1.0, 0.0, length(pu)).pow(ANIME_V ? 2.6 : 1.8);
     const pd = length(positionWorld.sub(cameraPosition));
-    pm.colorNode = vec3(1.0, 0.88, 0.7).mul(pf).mul(smoothstep(220.0, 40.0, pd)).mul(instanceColor.x).mul(0.12);
+    pm.colorNode = vec3(1.0, 0.88, 0.7).mul(pf).mul(smoothstep(220.0, 40.0, pd)).mul(instanceColor.x).mul(ANIME_V ? 0.06 : 0.12).mul(TOD.windows);
     pm.polygonOffset = true; pm.polygonOffsetFactor = -2;
     this.pools = new THREE.InstancedMesh(poolGeo, pm, beamCap);
     this.pools.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(beamCap * 3).fill(1), 3);
@@ -111,13 +122,13 @@ export class VehicleLights {
         const l = this.tail[ti++];
         _v.set(0, 0.3, M.length * 0.5 + 1.5).applyQuaternion(c.quat).add(c.pos);
         l.position.copy(_v);
-        l.intensity = (0.9 + c.light.z * 2.5) * c.light.y;
+        l.intensity = (0.9 + c.light.z * 2.5) * c.light.y * TAIL_K;
       }
       if (hi < this.head.length && c.light.x > 0 && c !== spotCar) {
         const l = this.head[hi++];
         _v.set(0, 0.7, -M.length * 0.5 - 2.6).applyQuaternion(c.quat).add(c.pos);
         l.position.copy(_v);
-        l.intensity = 9 * c.light.x;
+        l.intensity = HEAD_I * c.light.x;
       }
     }
     for (; ti < this.tail.length; ti++) this.tail[ti].intensity = 0;
@@ -173,7 +184,7 @@ export class VehicleLights {
       const x = i ? 0.62 : -0.62;
       s.position.set(x, M.height * 0.42, -M.length * 0.5 - 0.05).applyQuaternion(spotCar.quat).add(spotCar.pos);
       s.target.position.set(x * 1.6, -0.4, -M.length * 0.5 - 22).applyQuaternion(spotCar.quat).add(spotCar.pos);
-      s.intensity = 260 * spotCar.light.x;
+      s.intensity = SPOT_I * spotCar.light.x;
     }
   }
 }

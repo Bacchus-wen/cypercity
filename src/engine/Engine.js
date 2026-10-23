@@ -7,6 +7,7 @@ import { LAYOUT, SHOT_VIEWS } from '../world/layout.js';
 import { Assets } from './Assets.js';
 import { Input } from './Input.js';
 import { PostFX } from './PostFX.js';
+import { TOD_PRESET } from './timeOfDay.js';
 
 // Core engine. Systems are plain objects: { name, async init(ctx), update(dt, t, ctx), postUpdate?(dt, t, ctx) }.
 // ctx is the shared context passed to every system (see below). Systems must only touch their own content.
@@ -58,7 +59,7 @@ export class Engine {
       isShot: !!this.shot,
       quality: this.quality,
       // Global weather state shared by materials/particles/audio. Systems read these values each frame.
-      weather: { rain: 1.0, wetness: 1.0, wind: new THREE.Vector2(0.6, -0.25), lightning: 0 },
+      weather: { rain: TOD_PRESET?.weather.rain ?? 1.0, wetness: TOD_PRESET?.weather.wetness ?? 1.0, wind: new THREE.Vector2(0.6, -0.25), lightning: 0 },
       // Uniform-style shared time for TSL shaders: import { time } from 'three/tsl' is also available.
       cameraMode: this.shot ? 'shot' : 'player',
       // Simple event bus

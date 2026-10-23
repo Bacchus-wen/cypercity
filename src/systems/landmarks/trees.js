@@ -5,13 +5,15 @@ import {
 } from 'three/tsl';
 import { mulberry32, cylinderCol, groundY } from './util.js';
 import { U } from './materials.js';
+import { propGltf } from '../propModels.js';
 
 // Cherry blossom trees along the promenade (Blender-generated GLBs, instanced), falling petals, petals on water & ground.
+// Trees: models/landmarks2 (pipeline/blender/cherry_trees.py, original procedural designs); ?props=legacy = originals.
 export async function buildTrees(ctx, tex, root) {
   const P = ctx.layout.promenade;
   const R = ctx.layout.river;
   const W = R.waterLevel;
-  const variants = await Promise.all([0, 1, 2, 3].map((i) => ctx.assets.gltf(`models/landmarks/cherry_tree_${i}.glb`)));
+  const variants = await Promise.all([0, 1, 2, 3].map((i) => propGltf(ctx.assets, 'landmarks', `cherry_tree_${i}`)));
   const rng = mulberry32(4242);
 
   // ---- placement ----

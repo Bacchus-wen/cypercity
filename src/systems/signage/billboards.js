@@ -1,4 +1,4 @@
-// Giant animated billboards (未来へ A BRIGHTER TOMORROW, KAZE TECH), corner video screens, floating holograms.
+// Giant animated billboards (main brand key visual + channel letters), corner video screens, floating holograms.
 import * as THREE from 'three/webgpu';
 import {
   texture, uv, float, vec2, vec3, vec4, sin, cos, fract, floor, step, mix, smoothstep, clamp, hash, abs, exp, select, max, min, length,
@@ -7,6 +7,7 @@ import {
 import { uTime } from './materials.js';
 import { NEON } from './util.js';
 import { makeFacade } from './featured.js';
+import { artPath } from '../restyleArt.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -112,8 +113,8 @@ function mkRingMaterial(colorTex, uvr, tint) {
 export async function buildBillboards(ctx, sb, L, pool, facades) {
   const { scene, assets, layout, camera } = ctx;
   const [miraiTex, adsTex] = await Promise.all([
-    assets.texture('textures/signage/billboard_mirai.png', { srgb: false }),
-    assets.texture('textures/signage/ads_grid.png', { srgb: false }),
+    assets.texture(artPath('textures/signage/billboard_mirai.png'), { srgb: false }),
+    assets.texture(artPath('textures/signage/ads_grid.png'), { srgb: false }),
   ]);
   for (const t of [miraiTex, adsTex]) if (t) { t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; t.needsUpdate = true; }
   const updaters = [];
@@ -132,7 +133,7 @@ export async function buildBillboards(ctx, sb, L, pool, facades) {
   for (const f of facades) {
     if (f.virtual) break;
     const toCam = ov.clone().sub(f.center).setY(0); const d = toCam.length(); toCam.normalize();
-    if (f.normal.dot(toCam) < 0.75 || d < 30 || d > 90 || f.width < bbW + 1 || f.height < 24) continue;
+    if (f.normal.dot(toCam) < 0.75 || d < 30 || d > 90 || f.width < bbW + 1 || f.height < 24 || f.blocks) continue;
     const dir = f.center.clone().sub(ov).setY(0).normalize();
     const ang = Math.atan2(dir.clone().cross(fwd).y, dir.dot(fwd)); // + = left of forward
     if (ang < 0.15 || ang > 0.7) continue;
@@ -176,8 +177,8 @@ export async function buildBillboards(ctx, sb, L, pool, facades) {
     for (const [sx, sy, c] of [[-0.3, -0.3, [1, 0.3, 0.7]], [0.3, -0.3, [0.7, 0.3, 1]], [0, 0.3, [1, 0.45, 0.8]], [0, -0.55, [0.9, 0.35, 0.9]]]) {
       pool.add({ pos: center.clone().addScaledVector(bRight, sx * bbW).addScaledVector(normal, 4).add(new THREE.Vector3(0, sy * bbH, 0)), color: c, intensity: 160, distance: 24, seed: 1, ftype: 0, importance: 4 });
     }
-    // KAZE TECH channel letters above the billboard
-    const kz = L.chanH.find((d) => d.text === 'KAZE TECH');
+    // brand channel letters above the billboard (same brand as the key visual)
+    const kz = L.chanH.find((d) => d.text === 'TSUBAME');
     if (kz) {
       const kW = 15, kH = kW / kz.aspect;
       const kc = center.clone().addScaledVector(normal, 0.3); kc.y = center.y + bbH / 2 + 1.4 + kH / 2;
@@ -211,6 +212,8 @@ export async function buildBillboards(ctx, sb, L, pool, facades) {
     if (!near) continue;
     const w = Math.min(f.width * 0.7, 9), h = w;
     const c = f.center.clone().addScaledVector(f.normal, 0.35); c.y = Math.min(f.center.y + f.height / 2 - h / 2 - 1.5, 12 + h / 2 + (sIdx % 3) * 3);
+    // skip only if the screen itself would overlap a pod / bridge end / recessed floor on this wall
+    if (f.blocks && f.blocks.some((b) => w / 2 + 0.3 > b.a0 && -w / 2 - 0.3 < b.a1 && c.y + h / 2 + 0.3 > b.y0 && c.y - h / 2 - 0.3 < b.y1)) continue;
     sb.hbox(c.clone().addScaledVector(f.normal, -0.15), [f.right, UP, f.normal], [w / 2 + 0.25, h / 2 + 0.25, 0.2], [0.03, 0.03, 0.035], [0.6, 0.45]);
     addScreen(c.clone().addScaledVector(f.normal, 0.06), f.right, UP, f.normal, w, h, sIdx * 1.7, 2.4);
     pool.add({ pos: c.clone().addScaledVector(f.normal, 4), color: [0.8, 0.5, 1], intensity: 70, distance: 22, seed: 1, ftype: 0, importance: 2.5 });

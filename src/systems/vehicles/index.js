@@ -15,7 +15,7 @@ import { Traffic, SkyTraffic, mulberry32, PALETTE } from './traffic.js';
 import { VehicleLights } from './lights.js';
 import { DrivenCar } from './drive.js';
 
-const NAMES = { hero: 'KUROGANE GT-R', kei: 'MIZUCHI KEI', taxi: 'KAIDO CAB', van: 'ISUZU-ELF FREIGHT', av: 'ARASAKA AV' };
+const NAMES = { hero: 'RAIJIN GT', kei: 'KOBANA KEI', taxi: 'HATOBA CAB', van: 'HAKOBU FREIGHT', av: 'MINATO AERODYNE' }; // restyle brand set
 const _q = new THREE.Quaternion(), _v = new THREE.Vector3(), Y = new THREE.Vector3(0, 1, 0);
 
 function yawQuat(yaw) { return new THREE.Quaternion().setFromAxisAngle(Y, yaw); }
@@ -55,6 +55,10 @@ export default {
         addParked(parkTypes(), side * (curbX + (rng() - 0.5) * 0.15), z, side < 0 ? 0 : Math.PI + (rng() - 0.5) * 0.04);
       }
     }
+    // dev lineup (?cartest): one parked car of every type on the clear east kerb (shot view 'cars')
+    if (new URLSearchParams(location.search).has('cartest')) {
+      ['hero', 'kei', 'taxi', 'van', 'av'].forEach((t, i) => addParked(t, curbX, 26 - i * 6.2, Math.PI, PALETTE[t]?.[0]));
+    }
     for (const zc of cs.zs) {
       for (const side of [-1, 1]) {
         for (let x = cs.xStart + 15; x < cs.xEnd - 10; x += 6.6 + rng() * 2) {
@@ -68,6 +72,7 @@ export default {
     const heroPos = ctx.isShot ? new THREE.Vector3(-1.4, 0, 16.4) : new THREE.Vector3(curbX, 0, 15);
     this.hero = this.makeRecord('hero', ctx.isShot ? 'hero' : 'parked', heroPos, ctx.isShot ? 0 : 0, new THREE.Color(0x07070a));
     this.hero.light.set(1, 1, 0);
+    this.hero.hue = 0; // the player's car keeps its designed colours
     this.hero.solo = true;
     this.parked.push(this.hero);
 

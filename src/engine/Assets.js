@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 import { ANIME } from './AnimeLook.js';
+import { TOD_NAME } from './timeOfDay.js';
 
 // Anime look: photographic surface textures (asphalt, pavers, concrete, bark, facade atlas) are downscaled on load so
 // their fine grain disappears and only large colour blocks and patterns remain. Illustrated textures (signs, posters,
@@ -12,7 +13,12 @@ const ANIME_FLATTEN_FACTOR = 4;
 
 // Provisional anime palette for the facade atlas (until the user's visual references arrive): darker, cooler,
 // less saturated walls so the neon reads against a violet-grey base instead of milky beige.
-const ANIME_GRADE = { 'textures/buildings/atlas_albedo.png': { filter: 'saturate(0.7) brightness(0.8)', tint: 'rgb(214,208,255)' } };
+const FACADE_GRADE = {
+  legacy: { filter: 'saturate(0.7) brightness(0.8)', tint: 'rgb(214,208,255)' }, // previous violet night
+  night: { filter: 'saturate(0.6) brightness(0.78)', tint: 'rgb(222,226,232)' },  // S2: neutral slate concrete
+  dusk: { filter: 'saturate(0.75) brightness(0.9)', tint: 'rgb(246,232,222)' },   // warm, sun-washed
+};
+const ANIME_GRADE = { 'textures/buildings/atlas_albedo.png': FACADE_GRADE[TOD_NAME] || FACADE_GRADE.night };
 
 function downscale(t, f, grade) {
   const img = t.image;

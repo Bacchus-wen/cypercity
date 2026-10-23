@@ -4,6 +4,7 @@ import {
   attribute, texture, uniform, float, vec2, vec3, vec4, mix, step, smoothstep, clamp, hash, floor, fract, sin, cos, abs,
   max, min, pow, uv, positionLocal, positionWorld, normalWorld, cameraPosition, dot, length, select, Fn, normalize, exp,
 } from 'three/tsl';
+import { TOD } from '../../engine/timeOfDay.js';
 
 export const uTime = uniform(0);
 export const uWind = uniform(0.6);
@@ -94,7 +95,7 @@ export function makeFaceMaterial(neonTex, colorTex) {
   const albedo = select(isNeon.or(isChan), back.add(unlitGlass), select(isPaint, cm.rgb.mul(cm.rgb).mul(tint), vec3(0.02)));
   m.maskNode = open.not().or(tube.greaterThan(0.07));
   m.colorNode = albedo;
-  m.emissiveNode = emissiveN;
+  m.emissiveNode = emissiveN.mul(TOD.neon); // time-of-day: neon half on at dusk
   m.roughnessNode = select(isPaint, float(0.55), float(0.35));
   m.metalnessNode = select(isNeon.or(isChan), float(0.35), float(0.0));
   return m;

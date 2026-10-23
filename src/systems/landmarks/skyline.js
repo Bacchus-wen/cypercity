@@ -313,10 +313,11 @@ function holoMaterial(map, rect, intensity = 3, opts = {}) {
   return m;
 }
 
-function buildHolos(ctx, tex, root, towers) {
+export function buildHolos(ctx, tex, root, towers) {
   if (!tex.ads) return;
   const R = ctx.layout.river;
-  // atlas 1: 4 vertical panels (u: 0-.25 anime woman, .25-.5 KAZE TECH, .5-.75 MIRAI, .75-1 geisha)
+  // atlas 1: 4 vertical panels (restyle art: idol, TSUBAME, MINATO BANK, masked dancer; atlas 3: SPARKBITE,
+  // SYNAPSE+, HAKOBU, film poster). Legacy art (?art=legacy): anime woman, KAZE TECH, MIRAI, geisha
   // texture v=1 is top of image
   const panel = (i) => [i * 0.25 + 0.004, 0.0, (i + 1) * 0.25 - 0.004, 1.0];
   const place = (map, rect, w, h, x, y, z, ry, intensity, seed) => {
@@ -326,30 +327,30 @@ function buildHolos(ctx, tex, root, towers) {
     return mesh;
   };
   const faceWest = -Math.PI / 2; // plane normal +z rotated to -x
-  // hero MIRAI tower (268,-330), front face at x = 268 - 23 = 245, facing west towards promenade
+  // hero tower (268,-330), front face at x = 268 - 23 = 245, facing west towards promenade
   place(tex.ads, panel(2), 36, 72, 244.2, 110, -330, faceWest, 4.0, 1);
-  // KAZE TECH vertical on (255,-120) facade x = 238
+  // vertical panel on (255,-120) facade x = 238
   place(tex.ads, panel(1), 18, 36, 237.6, 110, -120, faceWest, 3.5, 2);
-  // anime woman on (300,-40) octagon, facing west
+  // panel on (300,-40) octagon, facing west
   place(tex.ads3 || tex.ads, panel(3), 22, 44, 280.5, 140, -40, faceWest, 3.2, 3);
-  // geisha on the twisted tower region (visible from overlook), facing south-west
+  // panel on the twisted tower region (visible from overlook), facing south-west
   place(tex.ads, panel(3), 26, 52, 352, 180, -230, -Math.PI * 0.35, 3.2, 4);
-  // MIRAI also facing the overlook / district (south face of tall taper)
+  // same panel also facing the overlook / district (south face of tall taper)
   place(tex.ads, panel(2), 24, 48, 330, 230, -449, 0, 4.0, 5);
   place(tex.ads3 || tex.ads, panel(0), 30, 60, 60, 300, -596, 0, 3.5, 6);
   place(tex.ads3 || tex.ads, panel(2), 26, 52, -120, 220, -539, 0.3, 3.0, 7);
   // procedural placement: big vertical ads on south faces of tall unrotated towers north/east of the district
-  const cand = towers.filter((t) => t.rot === 0 && t.h > 170 && t.z < -420 && t.x > -250 && (t.type === 'box' || t.type === 'stepped' || t.type === 'stepped2'));
+  const cand = towers.filter((t) => t.rot === 0 && t.h > 170 && t.z < -420 && t.x > -250 && (t.holoOK ?? (t.type === 'box' || t.type === 'stepped' || t.type === 'stepped2')));
   cand.slice(0, 18).forEach((t, i) => {
     const w = Math.min(t.w * 0.7, 46), h = w * 2;
-    const top = t.type === 'stepped' ? t.h * 0.56 : t.type === 'stepped2' ? t.h * 0.7 : t.h;
+    const top = t.type === 'stepped' ? t.h * 0.56 : t.type === 'stepped2' ? t.h * 0.7 : t.type === 'terrace' ? t.h * 0.45 : t.h;
     const y = Math.min(top - h * 0.6, t.h * 0.45 + h * 0.5);
     const zf = t.z + (t.type === 'stepped2' ? t.d * 0.5 : t.d / 2) + 0.6;
     if (i % 3 === 2 && tex.ads2) place(tex.ads2, i % 2 ? [0, 0.5, 1, 1] : [0, 0, 1, 0.5], w * 1.6, w * 0.4, t.x, y, zf, 0, 3.0, 20 + i);
     else { const pool = [[tex.ads3, 0], [tex.ads, 3], [tex.ads3, 1], [tex.ads, 0], [tex.ads3, 2], [tex.ads, 1], [tex.ads3, 3], [tex.ads, 2]].filter((p) => p[0]); const pk = pool[i % pool.length]; place(pk[0], panel(pk[1]), w, h, t.x, y, zf, 0, 3.4, 20 + i); }
   });
   if (tex.ads2) {
-    // wide horizontal ads (top: OKAMI MOTORS, bottom: HANAMI RAMEN), texture v: top half = 0.5..1
+    // wide horizontal ads (top / bottom half of atlas 2), texture v: top half = 0.5..1
     place(tex.ads2, [0, 0.5, 1, 1], 48, 12, 244.5, 40, -330, faceWest, 3.0, 8);
     place(tex.ads2, [0, 0.0, 1, 0.5], 40, 10, 237.6, 60, -120, faceWest, 3.0, 9);
     place(tex.ads2, [0, 0.5, 1, 1], 60, 15, 180, 320, -738, 0, 3.0, 10);

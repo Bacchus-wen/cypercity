@@ -41,7 +41,19 @@ function mkCanvas(w, h) { const c = document.createElement('canvas'); c.width = 
 function layoutText(it) {
   const out = [];
   const chars = [...it.text];
-  if (it.vertical) {
+  if (it.vertical && it.sideways) {
+    // Latin word running down a vertical blade, glyphs turned 90 deg and spaced by their own width (reads sideways)
+    const g = mkCanvas(8, 8).getContext('2d');
+    g.font = `${it.weight || 700} ${it.size}px ${it.font}`;
+    const track = it.track ?? 0.06;
+    const widths = chars.map((c) => g.measureText(c).width);
+    const total = widths.reduce((a, b) => a + b, 0) + track * it.size * (chars.length - 1);
+    let y = it.y - total / 2;
+    chars.forEach((ch, i) => {
+      out.push({ ...it, ch, x: it.x, y: y + widths[i] / 2, rot: Math.PI / 2, sz: it.size });
+      y += widths[i] + track * it.size;
+    });
+  } else if (it.vertical) {
     const step = it.size * (it.spacing ?? 1.06);
     const total = step * chars.length;
     let y = it.y - total / 2 + step / 2;

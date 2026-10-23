@@ -2,6 +2,7 @@
 // service drops to facades, and building-to-building spans.
 import { mulberry32 } from './rng.js';
 import { DETAIL_ATTRS } from './architecture.js';
+import { MASS } from './plan.js';
 
 const WIRE = { aCol: [0.015, 0.015, 0.017, 0], aPbr: [0.35, 0.2, 0, 0] };
 const POLE = { aCol: [0.42, 0.41, 0.39, 0], aPbr: [0.75, 0, 0, 0.9] };
@@ -131,7 +132,11 @@ export function buildCables(ctx, lots, B, out) {
   for (let z = av.zStart - 6; z > av.zEnd; z -= rng.range(10, 22)) {
     if (avSkip(z)) continue;
     const y1 = rng.range(7, 13), y2 = y1 + rng.range(-2, 2);
-    wire([front - 0.05, y1, z], [-front + 0.05, y2, z + rng.range(-6, 6)], rng.range(0.8, 1.8), 0.02, 12);
+    const zOff = rng.range(-6, 6), sag = rng.range(0.8, 1.8);
+    // (restyle: half of the facade-to-facade spans across the avenue: Night City streets are less wire-laced;
+    //  the draws above stay, so the poles and remaining wires keep their positions)
+    if (MASS && Math.floor(-z / 7) % 2 === 1) continue;
+    wire([front - 0.05, y1, z], [-front + 0.05, y2, z + zOff], sag, 0.02, 12);
   }
 
   // ---------- cross streets (near the avenue) ----------

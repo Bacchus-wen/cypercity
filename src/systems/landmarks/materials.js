@@ -3,6 +3,7 @@ import {
   texture, uv, positionWorld, normalWorld, mx_noise_float, vec2, vec3, vec4, float, mix, smoothstep, uniform,
   normalMap, color, clamp, max, min, abs, fract, floor, sin, hash, time, step, dot, normalize, Fn,
 } from 'three/tsl';
+import { artPath } from '../restyleArt.js';
 
 // Shared uniforms for landmark materials (updated from ctx.weather each frame)
 export const U = {
@@ -22,9 +23,9 @@ export async function loadTextures(ctx) {
     a.texture(T + n + '_r.png', { srgb: false }).then((t) => (out[n + '_r'] = t)),
   ]).concat([
     a.texture(T + 'blossom_cards_a.png', { srgb: true }).then((t) => (out.blossom = t)),
-    a.texture(T + 'holo_ads.png', { srgb: true }).then((t) => (out.ads = t)),
-    a.texture(T + 'holo_ads2.png', { srgb: true }).then((t) => (out.ads2 = t)),
-    a.texture(T + 'holo_ads3.png', { srgb: true }).then((t) => (out.ads3 = t)),
+    a.texture(artPath(T + 'holo_ads.png'), { srgb: true }).then((t) => (out.ads = t)),
+    a.texture(artPath(T + 'holo_ads2.png'), { srgb: true }).then((t) => (out.ads2 = t)),
+    a.texture(artPath(T + 'holo_ads3.png'), { srgb: true }).then((t) => (out.ads3 = t)),
     a.texture(T + 'petals_a.png', { srgb: true }).then((t) => (out.petals = t)),
     a.texture(T + 'wood_slats.png', { srgb: true }).then((t) => (out.wood = t)),
     a.texture(T + 'wood_slats_n.png', { srgb: false }).then((t) => (out.wood_slats_n = t)),

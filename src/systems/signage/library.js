@@ -2,12 +2,30 @@
 // Each design: { rect (atlas rect with uv), aspect (w/h), mode, natural: [wm, hm] }
 import { NeonAtlas, ColorAtlas, FONTS, textCentered, textVertical, fitText, roundRect, loadFonts } from './atlas.js';
 import { mulberry32 } from './util.js';
+import { ART_RESTYLE } from '../restyleArt.js';
+
+// Restyle (Night City direction): signs read mostly in English with a few Japanese / kanji accents. Designs keep
+// their original Japanese key in `text` (featured.js looks them up by it); only the drawn text changes.
+// ?art=legacy draws the original texts. Names are original (no Cyberpunk 2077 brands).
+const RESTYLE_TEXT = {
+  'ラーメン': 'RAMEN', 'カラオケ': 'KARAOKE', '居酒屋': 'BAR', 'やきとり': 'GRILL', '飲み屋': 'DRINKS', 'ネオン': 'NEON', '質': 'PAWN',
+  'ホテル': 'HOTEL', 'カフェ': 'CAFE', 'パチンコ': 'SLOTS', '麻雀': 'MAHJONG', '焼肉': 'BBQ', 'ゲーム': 'GAMES', '喫茶': 'COFFEE',
+  'スナック': 'LOUNGE', 'クラブ': 'CLUB', 'バー': 'BAR', '餃子': 'GYOZA', 'うどん': 'NOODLE', '質屋': 'LOANS', 'マッサージ': 'MASSAGE',
+  '漫画喫茶': 'NETCAFE', '中華': 'WOK', '銭湯': 'BATHS', '本日開店': 'OPEN', '整骨院': 'CLINIC', '立呑み': 'PUB', '串カツ': 'SKEWER',
+  // kept as accents: 寿司 電脳 夜市 薬 酒場 占い
+  'ネットカフェ': 'NET CAFE 24', 'カラオケ館': 'KARAOKE HALL', '焼肉 鉄火': 'TEKKA GRILL', '焼鳥 灯': 'AKARI SKEWERS',
+  '黒潮': 'KUROSHIO',
+};
+const show = (t) => (ART_RESTYLE ? RESTYLE_TEXT[t] ?? t : t);
+const isJP = (t) => /[^\x00-\x7f]/.test(t);
+// extra English horizontal neon of the restyle (appended to H_TXT)
+const H_TXT_R = ['NO VACANCY', 'LIQUOR', 'DINER', 'TATTOO', 'CHROME & CO', 'IMPLANTS', 'MOTEL', 'OPEN 24/7'];
 
 export const JP_V = ['ラーメン', 'カラオケ', '居酒屋', 'やきとり', '飲み屋', 'ネオン', '薬', '質', 'ホテル', 'カフェ', 'パチンコ', '寿司', '酒場',
   '麻雀', '占い', '焼肉', 'ゲーム', '喫茶', '電脳', '夜市', 'スナック', 'クラブ', 'バー', '餃子', 'うどん', '質屋', 'マッサージ', '漫画喫茶', '中華', '銭湯', '本日開店', '整骨院', '立呑み', '串カツ'];
 export const LAT_V = ['BAR', 'HOTEL', 'CLUB', 'SUSHI', 'SAKE', 'GAME'];
-export const H_TXT = ['NEON', 'IZAKAYA', 'HOTEL', 'KARAOKE', 'BAR', 'OPEN 24H', 'SUSHI', 'NOODLES', 'PACHINKO', 'ARCADE', 'LIQUOR', 'CLUB NOVA', 'RAMEN',
-  'CYBER CAFE', 'SAKE', 'GAME CENTER', 'ネットカフェ', 'カラオケ館', '焼肉 牛角', '居酒屋 鳥貴', 'HOSTEL', 'MOTEL', 'DRUGS', '24H', 'ROBOTICA', 'TOKYO NIGHTS', 'LUCKY', 'ホテル 夢'];
+export const H_TXT = ['NEON', 'IZAKAYA', 'HOTEL', 'KARAOKE', 'BAR', 'OPEN 24H', 'SUSHI', 'NOODLES', 'PACHINKO', 'ARCADE', 'LIQUOR', 'CLUB STATIC', 'RAMEN',
+  'CYBER CAFE', 'SAKE', 'GAME CENTER', 'ネットカフェ', 'カラオケ館', '焼肉 鉄火', '焼鳥 灯', 'HOSTEL', 'MOTEL', 'DRUGS', '24H', 'ROBO DOCK', 'HARBOR NIGHTS', 'LUCKY', 'NEST 8'];
 export const SCRIPT_TXT = ['Bar', 'Open', 'Love', 'Sushi', 'Cafe', 'Dreams', 'Neon', 'Night'];
 
 const PXM = 190; // atlas pixels per metre (nominal)
@@ -17,18 +35,29 @@ export async function buildLibrary(images) {
   const NA = new NeonAtlas(4096);
   const CA = new ColorAtlas(4096);
   const rnd = mulberry32(4242);
-  const L = { neonV: [], neonH: [], neonIcon: [], chanH: [], boxV: [], boxH: [], boxSq: [], posters: [], screens: [], tenant: [], misc: {} };
+  const L = { neonV: [], neonH: [], neonIcon: [], chanH: [], boxV: [], boxH: [], boxSq: [], posters: [], screens: [], screensWide: [], tenant: [], misc: {} };
   const put = (arr, rect, mode, extra = {}) => { if (rect) { const d = { rect, mode, aspect: rect.w / rect.h, natural: [rect.w / PXM, rect.h / PXM], ...extra }; arr.push(d); return d; } return null; };
 
   // ---------------- neon vertical blades (tube text, optional border)
   const vlist = [...JP_V, ...LAT_V];
   vlist.forEach((txt, i) => {
-    const chars = [...txt].length;
-    const W = 160, size = chars > 4 ? 92 : 108, step = size * 1.08;
-    const H = Math.round(chars * step + 84);
+    const dt = show(txt);
+    const chars = [...dt].length;
+    // (stacked Latin capitals need less than a CJK square per character: smaller size + tighter step keeps the
+    //  restyle's longer words inside the shared atlas)
+    const lat = ART_RESTYLE && !isJP(dt); // (legacy keeps the original stacked sizing for its Latin blades)
+    const sideways = lat && chars > 4; // long Latin words run sideways down the blade instead of letter-stacking
     const outline = rnd() < 0.4;
-    const font = rnd.pick([FONTS.goth, FONTS.meiryo, FONTS.goth, FONTS.mincho]);
-    const items = [{ type: 'text', text: txt, x: W / 2, y: H / 2, size, font, weight: outline ? 800 : 300, vertical: true, style: outline ? 'stroke' : 'fill', lw: outline ? 5 : 5 }];
+    const fontJP = rnd.pick([FONTS.goth, FONTS.meiryo, FONTS.goth, FONTS.mincho]);
+    const font = isJP(dt) ? fontJP : (outline ? FONTS.impact : FONTS.bahn);
+    const W = 160, size = sideways ? 104 : lat ? 84 : chars > 4 ? 92 : 108, spacing = lat ? 0.9 : 1.06;
+    let H;
+    if (sideways) {
+      const gm = document.createElement('canvas').getContext('2d');
+      gm.font = `${outline ? 800 : 300} ${size}px ${font}`;
+      H = Math.round(gm.measureText(dt).width * 1.08 + 84);
+    } else H = Math.round(chars * size * (lat ? spacing : 1.08) + 84); // (non-restyle keeps the original height)
+    const items = [{ type: 'text', text: dt, x: W / 2, y: H / 2, size, font, weight: outline ? 800 : 300, vertical: true, sideways, spacing, style: outline ? 'stroke' : 'fill', lw: outline ? 5 : 5 }];
     if (rnd() < 0.75) items.push({ type: 'rect', x: 14, y: 14, w: W - 28, h: H - 28, r: 20, lw: 5 });
     if (rnd() < 0.3) items.push({ type: 'rect', x: 26, y: 26, w: W - 52, h: H - 52, r: 10, lw: 4 });
     put(L.neonV, NA.add({ w: W, h: H, items }), 0, { text: txt });
@@ -37,14 +66,16 @@ export async function buildLibrary(images) {
   // overlook hero: ネオン + stacked NEON
   {
     const W = 230, size = 150, H = 7 * size * 1.04 + 120;
-    const items = [{ type: 'text', text: 'ネオン', x: W / 2, y: 60 + 1.5 * size * 1.04, size, font: FONTS.goth, weight: 300, vertical: true, style: 'fill', lw: 6 },
+    const items = [ART_RESTYLE
+      ? { type: 'text', text: 'ROOMS', x: W / 2, y: 60 + 1.5 * size * 1.04, size: size * 0.55, font: FONTS.bahn, weight: 300, vertical: true, style: 'fill', lw: 6 }
+      : { type: 'text', text: 'ネオン', x: W / 2, y: 60 + 1.5 * size * 1.04, size, font: FONTS.goth, weight: 300, vertical: true, style: 'fill', lw: 6 },
       { type: 'text', text: 'NEON', x: W / 2, y: 60 + 5 * size * 1.04, size: size * 0.92, font: FONTS.bahn, weight: 300, vertical: true, style: 'fill', lw: 6 },
       { type: 'rect', x: 16, y: 16, w: W - 32, h: H - 32, r: 30, lw: 7 }];
     L.misc.neonOverlook = put([], NA.add({ w: W, h: Math.round(H), items }), 0, { text: 'ネオンNEON' });
   }
 
   // ---------------- neon horizontal (tube) + script
-  H_TXT.forEach((txt) => {
+  (ART_RESTYLE ? [...H_TXT.map(show), ...H_TXT_R] : H_TXT).forEach((txt) => {
     const isJP = /[^\x00-\x7f]/.test(txt);
     const size = 96;
     const font = isJP ? FONTS.goth : rnd.pick([FONTS.bahn, FONTS.arial, FONTS.bahn, FONTS.impact]);
@@ -86,7 +117,7 @@ export async function buildLibrary(images) {
   }
 
   // ---------------- LED channel letters (filled bold) – used for rooftop / big horizontal signs
-  ['KAZE TECH', 'HOTEL', 'ARASAKA', 'MIRAI', '未来', 'NEON', 'ROBOTICA', 'カラオケ', 'TOKYO', 'SAKURA BANK', '電脳', 'KAIDO'].forEach((txt) => {
+  ['TSUBAME', 'HOTEL', 'SYNAPSE+', 'LUMI NOVA', '黒潮', 'NEON', 'HAKOBU', 'カラオケ', 'SPARKBITE', 'MINATO BANK', '電脳', 'GAME HIVE'].map(show).forEach((txt) => {
     const isJP = /[^\x00-\x7f]/.test(txt);
     const size = 150;
     const font = isJP ? FONTS.goth : FONTS.bahn;
@@ -102,45 +133,65 @@ export async function buildLibrary(images) {
     for (let j = 0; j < 2; j++) for (let i = 0; i < 4; i++) put(L.boxSq, CA.image(im, i * cw + 6, j * ch + 6, cw - 12, ch - 12, 360, 360), 1, { text: 'lb' + (j * 4 + i) });
   }
   // canvas light boxes – vertical blades
-  const schemes = [
+  const schemesL = [
     { bg: '#f4f1ea', fg: '#d0101a', band: '#d0101a' }, { bg: '#fff6d0', fg: '#101010', band: '#e02020' }, { bg: '#ffd400', fg: '#151515', band: '#151515' },
     { bg: '#ffffff', fg: '#1840c0', band: '#1840c0' }, { bg: '#d8102a', fg: '#ffffff', band: '#ffe060' }, { bg: '#151515', fg: '#ffd030', band: '#ffd030' },
     { bg: '#1a2a8a', fg: '#ffffff', band: '#40d0ff' }, { bg: '#ff5a9a', fg: '#ffffff', band: '#ffffff' }, { bg: '#20a050', fg: '#ffffff', band: '#ffffff' },
     { bg: '#ffffff', fg: '#111111', band: '#ff7a00' }, { bg: '#6a1ab0', fg: '#ffffff', band: '#ff60d0' }, { bg: '#f07010', fg: '#ffffff', band: '#ffffff' },
   ];
+  // restyle: white-faced boxes become dark-faced (Night City signage is dark-based; white boxes out-shone the neon)
+  const schemes = ART_RESTYLE ? schemesL.map((s) => (/^#f[0-9a-f]f/i.test(s.bg) || s.bg === '#ffffff' ? { bg: '#16161a', fg: s.fg === '#111111' || s.fg === '#101010' ? '#f2efe8' : s.fg, band: s.band } : s)) : schemesL;
   vlist.slice(0, 30).forEach((txt, i) => {
     const s = schemes[i % schemes.length];
-    const chars = [...txt].length;
-    const W = 150, H = Math.max(320, Math.round(chars * 120 + 90));
+    const chars = [...show(txt)].length;
+    const W = 150, H = Math.max(320, Math.round(chars * (!ART_RESTYLE || isJP(show(txt)) ? 120 : 92) + 90));
     put(L.boxV, CA.add(W, H, (g) => {
       const gr = g.createLinearGradient(0, 0, W, 0);
       gr.addColorStop(0, s.bg); gr.addColorStop(0.5, s.bg); gr.addColorStop(1, s.bg);
       g.fillStyle = gr; g.fillRect(0, 0, W, H);
       g.fillStyle = s.band; g.fillRect(0, 0, W, 26); g.fillRect(0, H - 26, W, 26);
       g.strokeStyle = s.band; g.lineWidth = 4; g.strokeRect(10, 34, W - 20, H - 68);
-      textVertical(g, txt, W / 2, 52, H - 52, FONTS.goth, 900, 112, s.fg);
+      const dt = show(txt);
+      if (ART_RESTYLE && !isJP(dt) && [...dt].length > 4) {
+        // long Latin words run sideways (rotated) on the light box, like the neon blades
+        g.save(); g.translate(W / 2, H / 2); g.rotate(Math.PI / 2);
+        textCentered(g, dt, 0, 4, FONTS.bahn, 900, H - 120, 104, s.fg);
+        g.restore();
+      } else textVertical(g, dt, W / 2, 52, H - 52, isJP(dt) ? FONTS.goth : FONTS.bahn, 900, isJP(dt) ? 112 : 92, s.fg);
       // small latin sub-text in bands
-      g.fillStyle = s.bg; g.font = `700 15px ${FONTS.bahn}`; g.textAlign = 'center'; g.fillText('SINCE 2061', W / 2, 18);
+      g.fillStyle = s.bg; g.font = `700 15px ${FONTS.bahn}`; g.textAlign = 'center'; g.fillText('SINCE 2079', W / 2, 18);
     }), 1, { text: txt });
   });
   // canvas light boxes – horizontal fascia (shop name + sub line)
-  const fasc = [['ラーメン 一番', 'RAMEN · 拉麺'], ['居酒屋 たぬき', 'IZAKAYA'], ['カラオケ', 'KARAOKE 24H'], ['ドラッグストア', 'DRUG STORE 薬'], ['寿司 まる', 'SUSHI BAR'], ['焼肉 炎', 'YAKINIKU'],
-    ['コンビニ', 'OPEN 24 HOURS'], ['ゲームセンター', 'GAME CENTER'], ['パチンコ 銀河', 'PACHINKO'], ['中華 龍', 'CHINESE'], ['喫茶 ルナ', 'COFFEE'], ['質 大黒屋', 'PAWN SHOP'],
-    ['ホテル 夢', 'HOTEL'], ['電脳館', 'CYBER WARE'], ['うどん 匠', 'UDON'], ['餃子の王', 'GYOZA'], ['ネットカフェ', 'NET CAFE'], ['立呑み 酔', 'STANDING BAR']];
+  // shop names of the restyle's own harbour-district brand set (shared with the generated ads / posters / light boxes)
+  const fasc = [['麺屋 黒潮', 'RAMEN · KUROSHIO'], ['居酒屋 灯', 'IZAKAYA AKARI'], ['カラオケ', 'KARAOKE ECHO FIN'], ['AMEDROP', 'DRUG & BEAUTY 薬'], ['寿司 波止場', 'SUSHI HATOBA'], ['焼肉 鉄火', 'YAKINIKU'],
+    ['RAINMART', 'OPEN 24 HOURS'], ['ゲームハイブ', 'GAME HIVE'], ['パチンコ 流星', 'PACHINKO'], ['中華 青龍', 'CHINESE'], ['喫茶 雨音', 'COFFEE'], ['質 波屋', 'PAWN SHOP'],
+    ['HARBOR POD', 'HOTEL · NEST 8'], ['シナプス義体院', 'SYNAPSE+ CLINIC'], ['うどん 潮', 'UDON'], ['餃子 汐', 'GYOZA'], ['BYTE DEN', 'NET CAFE'], ['立呑み 港', 'STANDING BAR']];
+  // restyle: English name first, the Japanese name (if any) moves to the small sub line
+  const FASC_R = {
+    '麺屋 黒潮': ['KUROSHIO', 'RAMEN · 麺屋 黒潮'], '居酒屋 灯': ['AKARI', 'BAR & GRILL · 灯'], 'カラオケ': ['ECHO FIN', 'KARAOKE BOXES'],
+    '寿司 波止場': ['HATOBA', 'SUSHI · 寿司'], '焼肉 鉄火': ['TEKKA', 'BBQ GRILL'], 'ゲームハイブ': ['GAME HIVE', 'ARCADE · VR'],
+    'パチンコ 流星': ['RYUSEI', 'SLOTS · OPEN 24H'], '中華 青龍': ['BLUE DRAGON', 'WOK · NOODLES'], '喫茶 雨音': ['AMANE', 'COFFEE · 喫茶'],
+    '質 波屋': ['NAMIYA', 'PAWN · LOANS'], 'シナプス義体院': ['SYNAPSE+', 'CHROME CLINIC'], 'うどん 潮': ['USHIO', 'NOODLE BAR'],
+    '餃子 汐': ['SHIO', 'DUMPLINGS'], '立呑み 港': ['MINATO', 'STANDING BAR'],
+  };
   fasc.forEach(([a, b], i) => {
     const s = schemes[(i * 5 + 3) % schemes.length];
     const W = 720, H = 160;
+    const [ma, mb] = ART_RESTYLE && FASC_R[a] ? FASC_R[a] : [a, b];
     put(L.boxH, CA.add(W, H, (g) => {
       g.fillStyle = s.bg; g.fillRect(0, 0, W, H);
       g.fillStyle = s.band; g.fillRect(0, H - 20, W, 20);
-      textCentered(g, a, W / 2 - 50, 64, FONTS.goth, 900, W - 160, 96, s.fg);
-      textCentered(g, b, W / 2 - 50, 126, FONTS.bahn, 700, W - 240, 26, s.fg);
+      textCentered(g, ma, W / 2 - 50, 64, isJP(ma) ? FONTS.goth : FONTS.bahn, 900, W - 160, 96, s.fg);
+      textCentered(g, mb, W / 2 - 50, 126, FONTS.bahn, 700, W - 240, 26, s.fg);
       g.fillStyle = s.band; g.beginPath(); g.arc(W - 72, 72, 52, 0, Math.PI * 2); g.fill();
-      textCentered(g, [...a][0], W - 72, 72, FONTS.goth, 900, 72, 64, s.bg);
+      textCentered(g, [...ma][0], W - 72, 72, isJP(ma) ? FONTS.goth : FONTS.bahn, 900, 72, 64, s.bg);
     }), 1, { text: a });
   });
   // small tenant-directory boxes (stacked zakkyo building signs)
-  const tenants = ['スナック 恋', 'BAR 月', '麻雀 東', 'クラブ 蝶', 'マッサージ', '占い 星', '歯科', '質 屋', 'ラウンジ 華', '英会話', '整体', 'カラオケ', 'BAR NOIR', '鍼灸', 'PUB 23', '雀荘', '焼鳥 鳥八', 'ダーツ', 'SNACK MAMA', 'ネイル'];
+  const tenants = ART_RESTYLE
+    ? ['BAR NOIR', 'PUB 23', 'DARTS', 'NAILS', 'TATTOO', 'LOANS', 'CLINIC 4F', 'MAHJONG', 'KARAOKE', 'LOUNGE', 'SNACK MAMA', 'DENTIST', 'TAROT', 'MASSAGE', 'GYM', 'PAWN', 'SALON', 'POOL', '雀荘', 'BAR 月']
+    : ['スナック 恋', 'BAR 月', '麻雀 東', 'クラブ 蝶', 'マッサージ', '占い 星', '歯科', '質 屋', 'ラウンジ 華', '英会話', '整体', 'カラオケ', 'BAR NOIR', '鍼灸', 'PUB 23', '雀荘', '焼鳥 鳥八', 'ダーツ', 'SNACK MAMA', 'ネイル'];
   tenants.forEach((t, i) => {
     const s = schemes[(i * 7 + 1) % schemes.length];
     put(L.tenant, CA.add(300, 150, (g) => {
@@ -158,6 +209,8 @@ export async function buildLibrary(images) {
   if (images.ads) {
     const im = images.ads, cw = im.width / 2, ch = im.height / 2;
     for (let j = 0; j < 2; j++) for (let i = 0; i < 2; i++) put(L.screens, CA.image(im, i * cw, j * ch, cw, ch, 300, 300), 5);
+    // restyle: 2:1 landscape crops (centre band of each ad) for the wide street screens of podium stores
+    if (ART_RESTYLE) for (let j = 0; j < 2; j++) for (let i = 0; i < 2; i++) put(L.screensWide, CA.image(im, i * cw, j * ch + ch * 0.25, cw, ch * 0.5, 400, 200), 5);
   }
   // misc: P parking, road signs, GOOD GAMES wall text, IZAKAYA 飲み屋 box, 24 sign
   L.misc.parking = put([], CA.add(256, 256, (g) => {
@@ -177,10 +230,10 @@ export async function buildLibrary(images) {
     textCentered(g, 'GOOD PEOPLE', 512, 280, FONTS.bahn, 700, 960, 150, '#f4f2ee');
   }), 3);
   L.misc.nomiya = put([], CA.add(700, 300, (g) => {
-    g.fillStyle = '#f4eee0'; g.fillRect(0, 0, 700, 300);
+    g.fillStyle = ART_RESTYLE ? '#16161a' : '#f4eee0'; g.fillRect(0, 0, 700, 300);
     g.strokeStyle = '#a01010'; g.lineWidth = 10; g.strokeRect(10, 10, 680, 280);
-    textCentered(g, '飲み屋', 350, 120, FONTS.mincho, 900, 600, 170, '#151010');
-    textCentered(g, 'IZAKAYA', 350, 245, FONTS.bahn, 700, 400, 60, '#a01010');
+    textCentered(g, ART_RESTYLE ? 'DRINKS' : '飲み屋', 350, 120, ART_RESTYLE ? FONTS.bahn : FONTS.mincho, 900, 600, 170, ART_RESTYLE ? '#f2efe8' : '#151010');
+    textCentered(g, ART_RESTYLE ? '飲み屋 · IZAKAYA' : 'IZAKAYA', 350, 245, FONTS.bahn, 700, 400, 60, '#a01010');
   }), 1);
   L.misc.sign24 = put([], CA.add(256, 256, (g) => {
     g.fillStyle = '#101010'; g.fillRect(0, 0, 256, 256);
@@ -240,10 +293,10 @@ export async function buildLibrary(images) {
       else textVertical(g, t, 128, 14, H - 14, FONTS.mincho, 900, n >= 3 ? 180 : 120, '#000');
     });
   }
-  // KAZE TECH logo glyph & holo text ring
+  // brand logo glyph & holo text ring
   L.misc.holoRing = put([], CA.add(2048, 160, (g) => {
     g.fillStyle = '#000'; g.fillRect(0, 0, 2048, 160);
-    const txt = '  ようこそ NEON KAIDO へ  ◆  WELCOME  ◆  未来へ  ◆  KAZE TECH  ◆ ';
+    const txt = '  ようこそ 港の夜へ  ◆  WELCOME  ◆  RIDE THE STORM  ◆  TSUBAME E-MOTO  ◆ ';
     textCentered(g, txt, 1024, 80, FONTS.goth, 800, 2000, 110, '#ffffff');
   }), 3);
 

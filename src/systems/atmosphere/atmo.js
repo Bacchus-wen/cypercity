@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import {
   Fn, vec2, vec3, vec4, float, uniform, texture, mix, smoothstep, exp, max, min, abs, cos, atan, dot, length,
-  normalize, select, positionWorld, cameraPosition, output, normalWorldGeometry,
+  normalize, select, positionWorld, cameraPosition, output, normalWorldGeometry, floor, fract, sin, time, step, pow,
 } from 'three/tsl';
 import { createNoiseTexture } from './noiseTex.js';
 
@@ -111,3 +111,72 @@ export const fogNodeFn = Fn(() => {
 
 // Background mesh: its normalWorldGeometry is the view direction (unit sphere around the camera).
 export const backgroundNode = () => skyColor(normalWorldGeometry);
+
+// ------------------------------------------------------------------------------------------------ painted sky
+// Anime / poster sky for the restyle (timeOfDay.js presets): flat graded bands from the horizon haze (U.fogColor,
+// so distant geometry still dissolves into it) to the zenith, a field of stars, a moon or sun disc with a soft halo,
+// and graphic cloud masses in three flat tones (shadow / body / lit side towards the moon or sun) outlined with a
+// thin glowing contour plus a weaker inner contour - the drawn-cloud look of the reference fan art.
+export const SKY = {
+  cloudShadow: v3(0.006, 0.01, 0.019), cloudBody: v3(0.016, 0.026, 0.044), cloudLight: v3(0.05, 0.075, 0.1),
+  outline: v3(0.26, 0.42, 0.5), outlineInner: v3(0.06, 0.1, 0.13), stars: uniform(1.0),
+  bodyDir: uniform(new THREE.Vector3(0.3, 0.45, -0.85).normalize()), bodyColor: v3(1.5, 1.55, 1.6), bodySize: uniform(0.045),
+  bodyGlow: v3(0.05, 0.07, 0.09), bodyIsSun: uniform(0),
+};
+
+const hash2 = (p) => fract(sin(dot(p, vec2(127.1, 311.7))).mul(43758.5453));
+
+export const paintedSky = Fn(([dirIn]) => {
+  const dir = normalize(dirIn);
+  const e = dir.y;
+  const h = max(e, 0.0);
+  // graded bands (haze -> mid -> zenith) with a touch of posterisation so the gradient reads as painted steps
+  const g1 = smoothstep(0.0, 0.16, h), g2 = smoothstep(0.1, 0.65, h);
+  const q1 = floor(g1.mul(5.0)).div(5.0).mul(0.35).add(g1.mul(0.65));
+  const q2 = floor(g2.mul(4.0)).div(4.0).mul(0.35).add(g2.mul(0.65));
+  const col = mix(mix(U.fogColor, U.midColor, q1), U.zenithColor, q2).toVar();
+  col.addAssign(hazeColor(dir).sub(mix(U.fogColor, U.midColor, smoothstep(0.0, 0.2, h))).max(0.0).mul(0.6)); // city glow / sunset band
+  // stars (fade near the horizon and behind clouds below)
+  const sp = dir.xz.div(h.add(0.35)).mul(160.0);
+  const cell = floor(sp);
+  const rnd = hash2(cell);
+  const off = vec2(hash2(cell.add(7.1)), hash2(cell.add(3.3))).sub(0.5).mul(0.7);
+  const dst = length(fract(sp).sub(0.5).sub(off));
+  const tw = sin(time.mul(rnd.mul(3.0).add(1.0)).add(rnd.mul(40.0))).mul(0.3).add(0.7);
+  const star = step(0.985, rnd).mul(smoothstep(0.12, 0.0, dst)).mul(tw).mul(smoothstep(0.08, 0.35, h)).mul(SKY.stars);
+  col.addAssign(vec3(0.55, 0.62, 0.7).mul(star));
+  // moon / sun disc + halo
+  const cd = dot(dir, SKY.bodyDir);
+  const ang = float(1).sub(cd).max(0.0).mul(2.0).sqrt(); // ~ angle in radians
+  const disc = smoothstep(SKY.bodySize, SKY.bodySize.mul(0.92), ang);
+  const crater = texture(noiseTex, dir.xy.mul(9.0)).r;
+  const moonFace = mix(float(1.0), crater.mul(0.45).add(0.6), float(1).sub(SKY.bodyIsSun));
+  col.assign(mix(col, SKY.bodyColor.mul(moonFace), disc));
+  col.addAssign(SKY.bodyGlow.mul(exp(ang.div(SKY.bodySize).mul(-0.9))).mul(float(1).sub(disc)));
+  // clouds on a plane above the city
+  // big cumulus masses: low frequency dominates, a little mid frequency for lumpy edges, no fine noise
+  const p = dir.xz.div(h.add(0.12)).mul(0.075).add(U.cloudOffset.mul(0.4));
+  const nAt = (pp) => texture(noiseTex, pp).r.mul(0.72).add(texture(noiseTex, pp.mul(2.1).add(vec2(0.31, 0.77))).g.mul(0.24))
+    .add(texture(noiseTex, pp.mul(4.3).add(vec2(0.53, 0.19))).b.mul(0.04));
+  const n = nAt(p);
+  const lightXZ = normalize(SKY.bodyDir.xz.add(vec2(0.0001, 0.0)));
+  const nL = nAt(p.add(lightXZ.mul(0.012)));
+  const c0 = U.cloudCover.add(0.04);
+  const inside = smoothstep(c0, c0.add(0.012), n);
+  const litSide = smoothstep(0.004, 0.02, nL.sub(n).negate()); // denser towards the light -> this side faces it
+  const core = smoothstep(c0.add(0.1), c0.add(0.14), n);
+  const tone = mix(mix(SKY.cloudBody, SKY.cloudLight, litSide), SKY.cloudShadow, core.mul(float(1).sub(litSide)).mul(0.8));
+  const edge = smoothstep(0.012, 0.0, abs(n.sub(c0))).mul(smoothstep(0.02, 0.12, h));
+  const inner = smoothstep(0.008, 0.0, abs(n.sub(c0.add(0.085)))).mul(smoothstep(0.03, 0.15, h));
+  const cloudFade = smoothstep(0.015, 0.09, h);
+  col.assign(mix(col, tone, inside.mul(cloudFade)));
+  col.addAssign(SKY.outline.mul(edge).add(SKY.outlineInner.mul(inner).mul(inside)));
+  // below the horizon: the same ground haze as the haze function
+  col.assign(mix(col, U.groundHaze.add(col.mul(0.5)), float(1).sub(smoothstep(-0.3, 0.0, e))));
+  // lightning still lights the deck
+  const ld = max(dot(dir, U.lightningDir), 0.0).pow(5.0);
+  col.addAssign(lightningColor.mul(U.lightning).mul(ld.mul(2.5).add(0.25)).mul(inside.mul(0.8).add(0.3)));
+  return col;
+});
+
+export const paintedBackgroundNode = () => paintedSky(normalWorldGeometry);

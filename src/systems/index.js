@@ -9,6 +9,7 @@ const ORDER = [
   'signage',    // neon signs, holo billboards, lanterns, street lamps (and their lights)
   'vehicles',   // parked cars, traffic, flying cars, drivable car
   'crowd',      // pedestrians
+  'pilot',      // Tripo pilot assets (?pilot=1 only)
   'weather',    // rain, splashes, drips, mist, lightning
   'player',     // controller, camera, HUD
   'audio',      // ambience

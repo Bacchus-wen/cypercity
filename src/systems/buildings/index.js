@@ -1,7 +1,8 @@
 // Buildings workstream: architecture of the district (facades, shopfronts, interiors, props, cables, alley, overlook).
 import * as THREE from 'three/webgpu';
 import { float } from 'three/tsl';
-import { buildPlan } from './plan.js';
+import { buildPlan, MASS } from './plan.js';
+import { makeIndex, buildPods, buildStairs, buildSkybridges, buildDucts, facadeBlocks } from './megamass.js';
 import { ChunkedBuckets } from './geom.js';
 import { buildLotArchitecture, sideFrame } from './architecture.js';
 import { ShopBuilder, SLOTS, ATLAS_SIZE, ATLAS_SOURCES } from './shops.js';
@@ -10,6 +11,8 @@ import { buildProps } from './props.js';
 import { buildCables } from './cables.js';
 import { buildAlley } from './alley.js';
 import { buildOverlook } from './overlook.js';
+import { artPath } from '../restyleArt.js';
+import { TOD } from '../../engine/timeOfDay.js';
 
 async function loadImage(url) {
   const r = await fetch(url);
@@ -24,7 +27,7 @@ async function buildShopAtlas() {
   g.fillStyle = '#808080'; g.fillRect(0, 0, ATLAS_SIZE, ATLAS_SIZE);
   await Promise.all(Object.entries(ATLAS_SOURCES).map(async ([slot, file]) => {
     try {
-      const img = await loadImage(`${import.meta.env.BASE_URL}textures/buildings/${file}.png`);
+      const img = await loadImage(`${import.meta.env.BASE_URL}${artPath(`textures/buildings/${file}.png`)}`);
       const [x, y, w, h] = SLOTS[slot];
       g.drawImage(img, x, y, w, h);
       img.close?.();
@@ -46,15 +49,18 @@ export default {
     let wetness = float(1);
     try { const w = await import('../../materials/wet.js'); if (w?.wetUniforms?.wetness) wetness = w.wetUniforms.wetness; } catch { /* optional */ }
 
+    // (restyle: the painted facade atlas of textures/buildings2/ replaces the photo atlas; ?art=legacy keeps it)
+    const albedoPath = artPath('textures/buildings/atlas_albedo.png');
+    const restyle = albedoPath !== 'textures/buildings/atlas_albedo.png';
     const [albedo, normal, interior, shopAtlas] = await Promise.all([
-      ctx.assets.texture('textures/buildings/atlas_albedo.png', { srgb: true, anisotropy: 8 }),
-      ctx.assets.texture('textures/buildings/atlas_normal.png', { srgb: false, anisotropy: 8 }),
-      ctx.assets.texture('textures/buildings/interior_atlas.png', { srgb: true, anisotropy: 4 }),
+      ctx.assets.texture(albedoPath, { srgb: true, anisotropy: 8 }),
+      ctx.assets.texture(artPath('textures/buildings/atlas_normal.png'), { srgb: false, anisotropy: 8 }),
+      ctx.assets.texture(artPath('textures/buildings/interior_atlas.png'), { srgb: true, anisotropy: 4 }),
       buildShopAtlas(),
     ]);
     const noise = createNoiseTexture(512);
     const mats = {
-      facade: createFacadeMaterial({ albedo, normal, interior, wetness, noise }),
+      facade: createFacadeMaterial({ albedo, normal, interior, wetness, noise, restyle }),
       detail: createDetailMaterial({ atlas: shopAtlas, wetness, noise }),
       glass: createGlassMaterial(),
     };
@@ -65,6 +71,15 @@ export default {
     const B = new ChunkedBuckets(96);
     const out = { colliders: [], lights: [], facades: [], props: null };
     for (const lot of lots) buildLotArchitecture(lot, B, out);
+    // Night City massing additions (bridges first: they claim space, pods and stairs avoid them)
+    if (MASS) {
+      const IX = makeIndex(lots, L);
+      const bridges = buildSkybridges(lots, B, L, IX);
+      const pods = buildPods(lots, B, IX);
+      const stairs = buildStairs(lots, B, IX);
+      const ducts = buildDucts(lots, B, IX);
+      console.log(`[buildings] massing: ${ducts} ducts, ${bridges.length} sky bridges (${bridges.map((b) => (b.axis === 'x' ? `z${b.c.toFixed(0)}` : `x${b.c.toFixed(0)}/z${b.z}`) + `@${b.y0.toFixed(0)}`).join(' ')}), ${pods} pods, ${stairs} stair towers`);
+    }
 
     // ---------- shopfronts ----------
     const shops = new ShopBuilder(B, out);
@@ -77,6 +92,8 @@ export default {
         // force the hero ramen shop on the left of the street view (ref panel 1)
         let type = null;
         if (f.district === 'avenue' && lot.x1 <= -9 && lot.z0 < 26 && lot.z1 > 18) type = 'ramen';
+        // merged podium stores are lit shops (a wide shutter or lobby read as a big black door)
+        else if (lot.podium) type = ['konbini', 'pachinko', 'boutique', 'bar'][lot.id % 4];
         // never two closed/quiet fronts in a row: keeps the street level lit and alive
         else if (prev && prev.closed && Math.hypot(prev.x - cx, prev.z - cz) < 16) type = OPEN[lot.id % OPEN.length];
         f.shopType = shops.build(lot, f, { type });
@@ -119,7 +136,9 @@ export default {
     }
     out.lights = kept;
     for (const l of out.lights) {
-      const pl = new THREE.PointLight(new THREE.Color(...l.color), l.intensity, l.distance, 2);
+      // (shop spill follows the time of day: full at night, about half at dusk; before, dusk kept full-strength
+      //  shop pools that read as hard orange blobs on the sidewalk)
+      const pl = new THREE.PointLight(new THREE.Color(...l.color), l.intensity * (0.4 + 0.6 * TOD.lights), l.distance, 2);
       pl.position.set(...l.pos);
       pl.castShadow = false;
       group.add(pl);
@@ -152,6 +171,8 @@ export default {
           // extras
           baseY, groundFloorHeight: lot.groundH, shopType: f.shopType || null, lane: !!f.lane, detail: lot.detail,
           style: lot.style, lotId: lot.id, overhang: (lot.overhang && f.side === lot.overhangSide) ? lot.overhang : 0, fasciaY: baseY + lot.groundH - 0.45, totalHeight: lot.h,
+          // wall areas covered by pods / sky bridge ends ({a0,a1,y0,y1}, a along `right` from the centre): no signs there
+          blocks: facadeBlocks(lot, f.side, fr),
         });
       }
     }

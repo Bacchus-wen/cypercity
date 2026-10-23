@@ -294,8 +294,10 @@ export class CharacterLibrary {
       play(name, fade = 0.3) {
         const a = actions[name];
         if (!a || ch.current === a) return;
+        // a faded-out action is disabled by the mixer: re-enable it and drop any pending fade before reusing it
+        a.enabled = true; a.stopFading();
         if (ch.current && fade > 0) { a.setEffectiveWeight(1); ch.current.crossFadeTo(a, fade, false); }
-        else { for (const x of Object.values(actions)) x.setEffectiveWeight(0); a.setEffectiveWeight(1); }
+        else { for (const x of Object.values(actions)) { x.stopFading(); x.setEffectiveWeight(0); } a.setEffectiveWeight(1); }
         a.time = ch.current ? ch.current.time / ch.current.getClip().duration * a.getClip().duration : 0;
         ch.current = a;
       },

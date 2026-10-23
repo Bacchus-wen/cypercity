@@ -1,8 +1,11 @@
 // Crowd system: pedestrians on sidewalks / cross streets / promenade / alley + idlers at shopfronts.
 // Near NPCs: SkeletonUtils clones (skinned, AnimationMixer at distance-based rate).
 // Far NPCs: VAT instanced draws per outfit (see vat.js). Deterministic in shot mode (seeded).
+// Characters: the Tripo library (tripoChars.js, one entry per character) by default; ?crowd=legacy uses the original
+// MakeHuman library (characters.js).
 import * as THREE from 'three/webgpu';
 import { CharacterLibrary, CROWD_U } from './characters.js';
+import { TripoCharacterLibrary } from './tripoChars.js';
 import { VatOutfit, VAT_MAP } from './vat.js';
 import { Population } from './agents.js';
 
@@ -10,6 +13,7 @@ const NEAR_R = 34;        // skinned radius
 const MAX_SKINNED = 40;   // simultaneous skinned NPCs
 const FAR_R = 170;        // VAT radius
 const VAT_MAX = 260;      // per-outfit instance cap
+const POOL_CAP = 10;      // idle skinned clones kept per outfit (extra ones are dropped on release)
 
 const _v = new THREE.Vector3(), _f = new THREE.Vector3(), _m = new THREE.Matrix4(), _m2 = new THREE.Matrix4();
 const _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _p = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
@@ -17,7 +21,8 @@ const _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _p = new THREE.Vect
 export default {
   async init(ctx) {
     this.ctx = ctx;
-    const lib = new CharacterLibrary(ctx);
+    const qs = new URLSearchParams(location.search);
+    const lib = qs.get('crowd') === 'legacy' ? new CharacterLibrary(ctx) : new TripoCharacterLibrary(ctx);
     this.lib = lib;
     ctx.api.crowd = {
       createCharacter: (variant) => lib.createCharacter(variant),
@@ -28,7 +33,6 @@ export default {
     if (!ok) { console.warn('[crowd] no character assets found'); return; }
     this.group = new THREE.Group(); this.group.name = 'crowd';
     ctx.scene.add(this.group);
-    const qs = new URLSearchParams(location.search);
 
     // population
     this.pop = new Population(ctx, lib, 20771);
@@ -46,18 +50,15 @@ export default {
     }
     // far umbrellas (instanced, hand-attached via baked hand matrices)
     this.farUmb = {};
-    const anySex = Object.values(lib.sexes)[0];
-    for (const kind of ['black', 'clear', 'led']) {
-      const src = anySex.byName['umbrella_' + kind];
-      if (!src) continue;
-      const parts = [];
-      src.traverse((o) => {
-        if (!o.isMesh) return;
-        const im = new THREE.InstancedMesh(o.geometry, lib.material(o.material.name.replace(/^crowd_/, ''), anySex.meta), VAT_MAX);
-        im.userData.tint = lib.tintFor(o.material.name.replace(/^crowd_/, ''), anySex.meta, 0);
+    const umbSrc = lib.umbrellaParts ? lib.umbrellaParts() : legacyUmbrellaParts(lib);
+    for (const [kind, list] of Object.entries(umbSrc)) {
+      const parts = list.map(({ geometry, material, tint }) => {
+        const im = new THREE.InstancedMesh(geometry, material, VAT_MAX);
+        im.userData.tint = tint;
         im.frustumCulled = false; im.count = 0; im.name = 'crowd_far_umbrella_' + kind;
         im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-        this.group.add(im); parts.push(im);
+        this.group.add(im);
+        return im;
       });
       this.farUmb[kind] = { parts, count: 0 };
     }
@@ -82,6 +83,10 @@ export default {
     const items = [];
     if (mode === 'outfits') {
       for (const o of lib.outfitList) items.push({ ...o, clip: 'walk' });
+    } else if (mode === 'variants') {
+      // colour variants: four characters x three tint seeds (designed colours, then two hue variants)
+      const pick = lib.outfitList.filter((_, i) => i % 2 === 0).slice(0, 4);
+      for (const t of [0, 12, 28]) for (const o of pick) items.push({ ...o, clip: 'walk', tint: t });
     } else {
       const clips = [['walk', null, false], ['walk_fast', null, false], ['umbrella_walk', 'black', false], ['umbrella_walk', 'clear', false],
         ['umbrella_walk', 'led', false], ['phone_walk', null, true], ['idle', null, false], ['phone_idle', null, true], ['umbrella_idle', 'black', false]];
@@ -100,9 +105,10 @@ export default {
     items.forEach((it, i) => {
       const ch = lib.createCharacter({ ...it, seed: it.seed ?? i * 5 + 1 });
       if (!ch) return;
-      const row = mode === 'outfits' ? Math.floor(i / 6) : 0;
-      const col = mode === 'outfits' ? i % 6 : i;
-      const cols = mode === 'outfits' ? 6 : n;
+      const grid = mode === 'outfits' || mode === 'variants';
+      const row = grid ? Math.floor(i / 6) : 0;
+      const col = grid ? i % 6 : i;
+      const cols = grid ? 6 : n;
       ch.object.position.set(1.5 + (col - (cols - 1) / 2) * 0.95, ctx.api.ground?.heightAt?.(0, 24) ?? 0, 24.5 - row * 2.2);
       ch.object.rotation.y = 0.35;
       ch.object.position.y += ch.sole;
@@ -123,8 +129,9 @@ export default {
       const clip = VAT_MAP[ag.clip] || 'walk';
       const sole = this.lib.sexes[ag.sex].meta.outfits[ag.outfit].sole;
       const sc = ag.scale ?? 1;
-      const tint = TINTS[(ag.tint ?? 0) % TINTS.length];
-      if (!v.push(ag.x, ag.y + sole * sc, ag.z, ag.yaw, clip, ag.phase ?? 0, sc, tint)) continue;
+      const tints = this.lib.farTints || TINTS;
+      const tint = tints[(ag.tint ?? 0) % tints.length];
+      if (!v.push(ag.x, ag.y + sole * sc, ag.z, ag.yaw, clip, ag.phase ?? 0, sc, tint, this.lib.hueFor?.(ag.tint) ?? 0)) continue;
       if (ag.umbrella && this.farUmb[ag.umbrella]) {
         const u = this.farUmb[ag.umbrella];
         if (v.handMatrix(clip, ag.phase ?? 0, _m2)) {
@@ -166,6 +173,13 @@ export default {
   release(ch) {
     if (ch.object.parent) ch.object.parent.remove(ch.object);
     let arr = this.pool.get(ch.key); if (!arr) this.pool.set(ch.key, (arr = []));
+    if (arr.length >= POOL_CAP) {
+      // geometry, materials and clips are shared: dropping the clone only frees its bones, mixer and wrappers
+      ch.mixer.stopAllAction(); ch.mixer.uncacheRoot(ch.object);
+      ch.object.traverse((m) => { if (m.isSkinnedMesh) m.skeleton.dispose(); });
+      this.skinnedCount--;
+      return;
+    }
     arr.push(ch);
   },
 
@@ -234,6 +248,23 @@ export default {
     if (ctx.isShot && this.frame === 60) console.log(`[crowd] skinned ${chosen.size}, far ${far.length}, total ${this.pop.agents.length}`);
   },
 };
+
+// legacy library: umbrella meshes are skinned to hand_r inside the crowd GLB (bind space)
+function legacyUmbrellaParts(lib) {
+  const out = {};
+  const anySex = Object.values(lib.sexes)[0];
+  for (const kind of ['black', 'clear', 'led']) {
+    const src = anySex.byName['umbrella_' + kind];
+    if (!src) continue;
+    out[kind] = [];
+    src.traverse((o) => {
+      if (!o.isMesh) return;
+      const name = o.material.name.replace(/^crowd_/, '');
+      out[kind].push({ geometry: o.geometry, material: lib.material(name, anySex.meta), tint: lib.tintFor(name, anySex.meta, 0) });
+    });
+  }
+  return out;
+}
 
 // mild per-instance albedo variation for far NPCs
 const TINTS = [[1, 1, 1], [0.8, 0.82, 0.9], [0.7, 0.68, 0.66], [0.9, 0.85, 0.8], [0.6, 0.62, 0.7], [1, 0.95, 0.95]];

@@ -15,8 +15,9 @@ import { Material, MeshStandardNodeMaterial, MeshPhysicalNodeMaterial, PhysicalL
 import {
   Fn, float, vec2, vec3, vec4, uniform, normalView, positionViewDirection, BRDF_GGX, BRDF_Lambert, diffuseContribution,
   specularColorBlended, roughness, luminance, materialReference, smoothstep, floor, fract, exp2, log2, max, min, mix, screenUV, screenSize,
-  convertToTexture, perspectiveDepthToViewZ, unpackRGBToNormal, abs, dot, clamp, select, length,
+  convertToTexture, perspectiveDepthToViewZ, unpackRGBToNormal, abs, dot, clamp, select, length, step,
 } from 'three/tsl';
+import { TOD_PRESET } from './timeOfDay.js';
 
 export const ANIME = typeof location !== 'undefined' && new URLSearchParams(location.search).get('look') === 'anime';
 
@@ -47,7 +48,7 @@ export const animeParams = {
   lineNormal: uniform(0.45),       // 1 - N·N' threshold for creases
   lineFadeStart: uniform(35),      // m
   lineFadeEnd: uniform(150),       // m
-  lineDepthInside: uniform(6),     // depth threshold multiplier inside foliage (only large jumps between clusters)
+  lineDepthInside: uniform(14),    // depth threshold multiplier inside foliage / lineMask surfaces (only big jumps between clumps)
   lineStrength: uniform(0.92),
   inkColor: uniform(vec3(0.010, 0.004, 0.018)),
   // paint filter
@@ -76,7 +77,10 @@ class AnimeLightingModel extends PhysicalLightingModel {
     const figure = materialReference('animeRim', 'float');
     const envTh = mix(float(1), float(5), smoothstep(0.15, 0.45, roughness));
     const th = P.specThreshold.mul(mix(envTh, materialReference('animeSpecTh', 'float'), figure));
-    const hard = smoothstep(th.mul(0.8), th.mul(1.25), luminance(ggx));
+    // grazing lights get no hard highlight shapes: the low dusk sun (9 deg) otherwise paints one big flat glint
+    // patch on wet ground right in front of the camera
+    // (environment surfaces only: figures, i.e. characters and vehicles, keep their grazing paint / glass highlights)
+    const hard = smoothstep(th.mul(0.8), th.mul(1.25), luminance(ggx)).mul(mix(smoothstep(0.12, 0.3, dotNL), float(1), figure));
     const tint = specularColorBlended.div(luminance(specularColorBlended).max(0.02)).min(vec3(1.5));
     reflectedLight.directSpecular.addAssign(irradiance.mul(hard).mul(P.specPeak).mul(tint));
   }
@@ -98,7 +102,7 @@ class AnimeLightingModel extends PhysicalLightingModel {
     const rimLight = P.rimColor.mul(rim).mul(P.rimIntensity).mul(diffuseContribution.add(0.05));
     const figure = materialReference('animeRim', 'float');
     const keyLit = smoothstep(0.08, 0.16, normalView.dot(P.keyDir.normalize()));
-    const keyLight = P.keyColor.mul(keyLit).mul(P.keyIntensity).mul(figure).mul(diffuseContribution.add(0.03));
+    const keyLight = P.keyColor.mul(keyLit).mul(P.keyIntensity).mul(figure).mul(materialReference('animeKey', 'float')).mul(diffuseContribution.add(0.03));
     // designed shade colour: pixels in the lowest bands take a violet shade instead of a plain darker albedo
     const shade = float(1).sub(smoothstep(floorIrr.mul(1.5), floorIrr.mul(4), banded));
     const toon = diffuse.mul(banded.div(irradiance)).mul(mix(vec3(1), P.shadeTint, shade));
@@ -113,6 +117,7 @@ export function installAnimeLighting() {
   Material.prototype.animeRim = 0; // 1 = hard rim light (characters, vehicles)
   Material.prototype.animeFloor = -1; // >= 0: per-material lowest irradiance band
   Material.prototype.animeSpecTh = 1; // per-material highlight threshold multiplier (figures)
+  Material.prototype.animeKey = 1; // per-material key light scale (light-coloured figures need less)
   MeshStandardNodeMaterial.prototype.setupLightingModel = function () { return new AnimeLightingModel(); };
   MeshPhysicalNodeMaterial.prototype.setupLightingModel = function () {
     return new AnimeLightingModel(this.useClearcoat, this.useSheen, this.useIridescence, this.useAnisotropy, this.useTransmission, this.useDispersion, this.useRetroreflection);
@@ -126,6 +131,9 @@ export function animeStylize({ color, depthTex, normalTex, metalRough, camera })
   const near = uniform(camera.near), far = uniform(camera.far);
   const src = convertToTexture(color);
   const px = vec2(1).div(screenSize);
+  // metalRough.b packs 0.5 * lineMask + 0.25 * figure (see PostFX); 8-bit, so decode with thresholds
+  const lineMaskAt = (u) => step(0.375, metalRough.sample(u).b);
+  const figureAt = (u) => { const b = metalRough.sample(u).b; return step(0.125, b.sub(step(0.375, b).mul(0.5))); };
 
   // --- generalized Kuwahara: 8 smooth, overlapping sectors on a disc (no blocky squares like the 4-quadrant box
   // version). Sector and radial weights depend only on the sample offset, so they are baked as constants; each sector
@@ -163,7 +171,7 @@ export function animeStylize({ color, depthTex, normalTex, metalRough, camera })
       out.addAssign(mean.mul(alpha));
       wsum.addAssign(alpha);
     }
-    return mix(src.sample(uv).rgb, out.div(wsum), P.kuwahara);
+    return mix(src.sample(uv).rgb, out.div(wsum), P.kuwahara.mul(float(1).sub(figureAt(uv))));
   })();
 
   // --- ink outlines from depth (1/z laplacian) and normal creases --------------------------------------------------
@@ -176,7 +184,7 @@ export function animeStylize({ color, depthTex, normalTex, metalRough, camera })
     const wc = invZ(uv);
     const lapX = abs(invZ(uv.add(ox)).add(invZ(uv.sub(ox))).sub(wc.mul(2)));
     const lapY = abs(invZ(uv.add(oy)).add(invZ(uv.sub(oy))).sub(wc.mul(2)));
-    const mask = (u) => metalRough.sample(u).b;
+    const mask = lineMaskAt;
     const inside = mask(uv).mul(min(min(mask(uv.add(ox)), mask(uv.sub(ox))), min(mask(uv.add(oy)), mask(uv.sub(oy)))));
     const thr = mix(P.lineDepth, P.lineDepth.mul(P.lineDepthInside), inside);
     const dEdge = smoothstep(thr, thr.mul(2), max(lapX, lapY).div(wc));
@@ -185,7 +193,7 @@ export function animeStylize({ color, depthTex, normalTex, metalRough, camera })
       max(float(1).sub(dot(nc, nrm(uv.add(ox)))), float(1).sub(dot(nc, nrm(uv.sub(ox))))),
       max(float(1).sub(dot(nc, nrm(uv.add(oy)))), float(1).sub(dot(nc, nrm(uv.sub(oy))))),
     );
-    const nEdgeRaw = smoothstep(P.lineNormal, P.lineNormal.mul(1.5), crease).mul(float(1).sub(metalRough.sample(uv).b));
+    const nEdgeRaw = smoothstep(P.lineNormal, P.lineNormal.mul(1.5), crease).mul(float(1).sub(lineMaskAt(uv)));
     const dist = float(1).div(wc);
     const fade = float(1).sub(smoothstep(P.lineFadeStart, P.lineFadeEnd, dist));
     // line hierarchy: inner crease lines drop out well before silhouettes do
@@ -259,4 +267,13 @@ export function applyAnimeGrade(params) {
   params.shadowTint.value.set(-0.010, -0.020, 0.050);
   params.highlightTint.value.set(0.985, 0.975, 1.03);
   params.lift.value.set(0.004, 0.002, 0.012);
+  // time-of-day preset (timeOfDay.js): grade + the lighting model's designed colours
+  const T = TOD_PRESET;
+  if (T) {
+    params.saturation.value = T.grade.saturation; params.contrast.value = T.grade.contrast;
+    params.shadowTint.value.copy(T.grade.shadowTint); params.highlightTint.value.copy(T.grade.highlightTint); params.lift.value.copy(T.grade.lift);
+    const P = animeParams, A = T.anime;
+    P.shadeTint.value.copy(A.shadeTint); P.rimColor.value.copy(A.rimColor); P.keyColor.value.copy(A.keyColor); P.inkColor.value.copy(A.inkColor);
+    P.rimIntensity.value = A.rimIntensity; P.keyIntensity.value = A.keyIntensity;
+  }
 }

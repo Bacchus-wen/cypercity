@@ -5,6 +5,7 @@ import { loadTextures, U } from './materials.js';
 import { buildRail } from './rail.js';
 import { buildExpressway } from './expressway.js';
 import { buildSkyline } from './skyline.js';
+import { buildSkyline2 } from './skyline2.js';
 import { buildRiver } from './river.js';
 import { buildTrees } from './trees.js';
 import { buildBridge } from './bridge.js';
@@ -46,7 +47,9 @@ export default {
     await optional('props', () => buildProps(ctx, tex, root, trees?.spots || []));
     const br = await optional('bridge', () => buildBridge(ctx, tex, root));
     if (br) api.bridges = br.api;
-    const sky = await optional('skyline', () => buildSkyline(ctx, tex, root));
+    // restyle skyline (Night City direction) by default; ?skyline=legacy builds the original towers
+    const legacySky = new URLSearchParams(location.search).get('skyline') === 'legacy';
+    const sky = await optional('skyline', () => (legacySky ? buildSkyline(ctx, tex, root) : buildSkyline2(ctx, tex, root)));
     if (sky) api.skyline = { towers: sky.towers.map((t) => ({ x: t.x, z: t.z, w: t.w, d: t.d, h: t.h })) };
     ctx.api.landmarks = api;
   },

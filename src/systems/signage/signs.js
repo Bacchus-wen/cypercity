@@ -11,6 +11,15 @@ const HOUSING_COLS = [
   [[0.5, 0.5, 0.5], [0.0, 0.5]], [[0.35, 0.03, 0.03], [0.2, 0.45]], [[0.03, 0.05, 0.12], [0.3, 0.45]], [[0.6, 0.6, 0.62], [0.1, 0.4]],
 ];
 
+// Buildings report wall areas taken by bolt-on pods and sky bridge ends (f.blocks: a0..a1 along `right` from the
+// facade centre, y0..y1); signs that would cut through them are skipped.
+function blocked(f, a0, a1, y0, y1) {
+  const B = f.blocks;
+  if (!B) return false;
+  for (const b of B) if (a1 > b.a0 && a0 < b.a1 && y1 > b.y0 && y0 < b.y1) return true;
+  return false;
+}
+
 export class SignBuilder {
   constructor(lib, faces, housing, pool, rnd) {
     this.lib = lib; this.F = faces; this.H = housing; this.pool = pool; this.rnd = rnd;
@@ -64,6 +73,7 @@ export class SignBuilder {
     let Hh = D / design.aspect;
     const maxH = o.maxH ?? 9;
     if (Hh > maxH) { Hh = maxH; D = Hh * design.aspect; }
+    if (blocked(f, a - 0.4, a + 0.4, y0 - 0.2, y0 + Hh + 0.2)) return null;
     const T = o.thick ?? (isNeon ? rnd.range(0.18, 0.3) : rnd.range(0.25, 0.4));
     const gap = o.gap ?? rnd.range(0.25, 0.5);
     const base = f.center.clone().addScaledVector(r, a);
@@ -121,6 +131,7 @@ export class SignBuilder {
     const isNeon = design.mode === 0 || design.mode === 4;
     let W = o.width ?? 3; let Hh = W / design.aspect;
     if (o.maxH && Hh > o.maxH) { Hh = o.maxH; W = Hh * design.aspect; }
+    if (blocked(f, a - W / 2 - 0.1, a + W / 2 + 0.1, yc - Hh / 2 - 0.1, yc + Hh / 2 + 0.1)) return null;
     const Dp = o.depth ?? (isNeon ? 0.12 : rnd.range(0.2, 0.35));
     const c = f.center.clone().addScaledVector(r, a).addScaledVector(n, Dp / 2 + (o.off ?? 0.03));
     c.y = yc;
@@ -155,6 +166,7 @@ export class SignBuilder {
     const D = 0.95, cellH = D / 2, T = 0.3, gap = 0.3;
     const base = f.center.clone().addScaledVector(r, a);
     const Htot = count * (cellH + 0.04);
+    if (blocked(f, a - 0.4, a + 0.4, y0 - 0.2, y0 + Htot + 0.2)) return null;
     base.y = y0 + Htot / 2;
     const c = base.clone().addScaledVector(n, gap + D / 2);
     const hcol = [0.55, 0.55, 0.56], hmr = [0.6, 0.4];

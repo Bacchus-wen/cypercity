@@ -5,6 +5,12 @@ import { mulberry32 } from './rng.js';
 
 const EPS = 0.05;
 
+// restyle step 2 (Night City massing): taller district, module gaps, pods, stairs, sky bridges. ?mass=legacy = original
+export const MASS = typeof location === 'undefined' || new URLSearchParams(location.search).get('mass') !== 'legacy';
+// floor ranges with a restyle alternative: one random draw serves both, so the lot subdivision (and the original
+// street compositions) stays identical and only the heights change
+const M = (a, b) => ({ l: a, m: b });
+
 export const STYLES = {
   // layer = wall texture atlas layer, kind = window layout (0 punched, 1 ribbon, 2 curtain wall)
   tile:      { layer: 0, texScale: 0.9, kind: 0, bay: [2.4, 3.4], ww: [0.5, 0.72], wh: [0.48, 0.6], balcony: 0.5, ac: 0.7, frame: 'alu' },
@@ -67,6 +73,12 @@ export function buildPlan(L) {
     return s;
   }
 
+  // one draw -> legacy floors (drives the RNG-dependent branches exactly as before) and restyle floors
+  const pickFloors = (fr) => {
+    const u = rng();
+    const at = (ab) => Math.floor(ab[0] + (ab[1] - ab[0] + 1) * u);
+    return fr.l ? { floors: MASS ? at(fr.m) : at(fr.l), floorsL: at(fr.l) } : { floors: at(fr), floorsL: at(fr) };
+  };
   let nextId = 0;
   function addLot(r, opts) {
     const w = Math.min(r.x1 - r.x0, r.z1 - r.z0);
@@ -76,20 +88,29 @@ export function buildPlan(L) {
     const groundH = opts.groundH ?? rng.range(3.9, 4.6);
     let h = groundH + (floors - 1) * floorH;
     const cap = heightCap(r.x0, r.x1, r.z0, r.z1);
+    const capF = Math.max(1, Math.floor((cap - groundH) / floorH) + 1);
     if (h > cap) {
-      floors = Math.max(1, Math.floor((cap - groundH) / floorH) + 1);
+      floors = capF;
       h = groundH + (floors - 1) * floorH;
     }
+    let floorsL = opts.floorsL ?? opts.floors;
+    if (groundH + (floorsL - 1) * floorH > cap) floorsL = capF;
     const style = opts.style || pickStyle(opts.tower ? TOWER_STYLES : FRONT_STYLES, w, floors);
     const lot = {
       id: nextId++, x0: r.x0, x1: r.x1, z0: r.z0, z1: r.z1, baseY: opts.baseY || 0,
       floors, floorH, groundH, h, style, detail: opts.detail || 'lo', fronts: [], tower: !!opts.tower,
       seed: rng(), setback: null, roofKind: rng(),
     };
-    // stepped setback for taller buildings
-    if (floors >= 9 && rng.chance(opts.tower ? 0.55 : 0.35)) {
-      const sf = Math.floor(floors * rng.range(0.45, 0.75));
-      lot.setback = { atFloor: sf, inset: rng.range(1.5, 3.5) };
+    // stepped setback for taller buildings (the main RNG is drawn exactly as the original did, from the legacy
+    // floor count; the restyle decides from its own floors and falls back to a per-lot RNG for missing draws)
+    const pS = opts.tower ? 0.55 : 0.35;
+    let roll = null, r1 = null, r2 = null;
+    if (floorsL >= 9) { roll = rng(); if (roll < pS) { r1 = rng(); r2 = rng(); } }
+    const aux = MASS ? mulberry32((lot.id * 7349 + 11) >>> 0) : null;
+    const on = MASS ? floors >= 9 && (roll ?? aux()) < pS : roll !== null && roll < pS;
+    if (on) {
+      const sf = Math.floor(floors * (0.45 + 0.3 * (r1 ?? aux())));
+      lot.setback = { atFloor: sf, inset: 1.5 + 2 * (r2 ?? aux()) };
     }
     lots.push(lot);
     return lot;
@@ -127,7 +148,7 @@ export function buildPlan(L) {
         else r = { x0: rem.x0 + t, x1: rem.x0 + t + w, z0: rem.z1 - dj, z1: rem.z1 };
         t += w;
         const lot = addLot(r, {
-          floors: rng.int(st.floors[0], st.floors[1]), detail: st.detail, baseY: st.baseY,
+          ...pickFloors(st.floors), detail: st.detail, baseY: st.baseY,
           groundH: st.groundH, style: st.style,
         });
         if (lot) made.push(lot);
@@ -142,7 +163,7 @@ export function buildPlan(L) {
     if (rem && cfg.interior !== false) {
       bsp(rem, cfg.towerSize || [12, 26], (r) => {
         const lot = addLot(r, {
-          floors: rng.int(...(cfg.towerFloors || [8, 20])), detail: cfg.towerDetail || 'lo', tower: true,
+          ...pickFloors(cfg.towerFloors || [8, 20]), detail: cfg.towerDetail || 'lo', tower: true,
         });
         if (lot) made.push(lot);
       });
@@ -207,7 +228,7 @@ export function buildPlan(L) {
       const isAlleySeg = sideSign < 0 && (seg.nKind === 'alley' || seg.sKind === 'alley');
       const streets = [];
       const avSide = sideSign > 0 ? 'nx' : 'px';
-      streets.push({ side: avSide, district: 'avenue', shop: true, depth: [11, 16], width: [6, 13], floors: [4, 13], detail: 'hi' });
+      streets.push({ side: avSide, district: 'avenue', shop: true, depth: [11, 16], width: [6, 13], floors: M([4, 13], [5, 16]), detail: 'hi' });
       const kN = seg.nKind === 'alley' ? 'alleyS' : seg.nKind; // block north edge (z0) faces street to north
       const kS = seg.sKind === 'alley' ? 'alleyN' : seg.sKind;
       if (isStreet(kN) && kN !== 'end') streets.push({ side: 'nz', district: kindDistrict(kN), shop: true, depth: [8, 14], width: isAlleySeg ? [4, 7] : [6, 12], floors: isAlleySeg ? [2, 6] : [3, 10], detail: 'hi' });
@@ -218,7 +239,7 @@ export function buildPlan(L) {
       // back lane
       streets.push({ side: sideSign > 0 ? 'px' : 'nx', district: 'cross', shop: false, lane: true, depth: [6, 9], width: [7, 14], floors: [3, 8], detail: 'mid' });
       // special: the alley-adjacent west segments get extended alley handled separately below
-      carveBlock(rect, streets, { towerFloors: [10, 22], towerDetail: 'mid', towerSize: [12, 22] });
+      carveBlock(rect, streets, { towerFloors: M([10, 22], [14, 32]), towerDetail: 'mid', towerSize: [12, 22] });
     }
   }
 
@@ -278,7 +299,7 @@ export function buildPlan(L) {
     if (!wS) streets.push({ side: 'pz', district: 'cross', shop: false, lane: true, depth: [8, 13], width: [6, 13], floors: [2, 8], detail });
     streets.push({ side: 'nx', district: 'cross', shop: false, lane: true, depth: [8, 13], width: [6, 13], floors: [2, 9], detail });
     streets.push({ side: 'px', district: 'cross', shop: false, lane: true, depth: [8, 13], width: [6, 13], floors: [2, 9], detail });
-    return { streets, cfg: { towerFloors: dist < 120 ? [6, 18] : [8, 26], towerDetail: detail, towerSize: [12, 24] } };
+    return { streets, cfg: { towerFloors: dist < 120 ? M([6, 18], [8, 24]) : M([8, 26], [12, 34]), towerDetail: detail, towerSize: [12, 24] } };
   }
 
   const backZCuts = [
@@ -318,7 +339,7 @@ export function buildPlan(L) {
     const R = { x0: riverBankE, x1: 400, z0: -700, z1: 170 };
     fillRegion(R, [270, 330], [zGap(-480, 4), zGap(-330, 4), zGap(-200, 4), zGap(-60, 4), zGap(60, 4)], 8, (r) => {
       const c = backCfg(r, 0, () => 999);
-      c.cfg.towerFloors = [10, 34];
+      c.cfg.towerFloors = M([10, 34], [14, 40]);
       if (Math.abs(r.x0 - riverBankE) < EPS) c.streets.unshift({ side: 'nx', district: 'river', shop: false, depth: [10, 16], width: [8, 16], floors: [5, 16], detail: 'lo' });
       return c;
     });
@@ -336,6 +357,63 @@ export function buildPlan(L) {
   ovLot.fronts.push({ side: 'nz', district: 'cross', shop: true });
   ovLot.overlook = { deckY };
   ovLot.setback = null;
+
+  // ---------------- restyle: merge sibling interior towers into wide megastructure bodies ----------------
+  // (after all lots exist, with its own RNG, so the subdivision itself stays identical to the original)
+  if (MASS) {
+    const mr = mulberry32(0x3E6A);
+    const towers = lots.filter((l) => l.tower && !l.fronts.length && !l.overlook);
+    const gone = new Set();
+    const near = (p, q) => Math.abs(p - q) < 0.05;
+    for (const a of towers) {
+      if (gone.has(a) || a.mega) continue;
+      for (const b of towers) {
+        if (b === a || gone.has(b) || b.mega) continue;
+        const sameZ = near(a.z0, b.z0) && near(a.z1, b.z1) && (near(a.x1, b.x0) || near(b.x1, a.x0));
+        const sameX = near(a.x0, b.x0) && near(a.x1, b.x1) && (near(a.z1, b.z0) || near(b.z1, a.z0));
+        if (!sameZ && !sameX) continue;
+        const r = { x0: Math.min(a.x0, b.x0), x1: Math.max(a.x1, b.x1), z0: Math.min(a.z0, b.z0), z1: Math.max(a.z1, b.z1) };
+        if (Math.max(r.x1 - r.x0, r.z1 - r.z0) > 60 || mr() > 0.55) continue;
+        Object.assign(a, r);
+        a.floors = Math.max(a.floors, b.floors) + mr.int(0, 4);
+        let h = a.groundH + (a.floors - 1) * a.floorH;
+        const cap = heightCap(r.x0, r.x1, r.z0, r.z1);
+        if (h > cap) { a.floors = Math.max(1, Math.floor((cap - a.groundH) / a.floorH) + 1); h = a.groundH + (a.floors - 1) * a.floorH; }
+        a.h = h; a.mega = true;
+        if (a.setback && a.setback.atFloor >= a.floors - 2) a.setback = null;
+        gone.add(b);
+        break;
+      }
+    }
+    for (let i = lots.length - 1; i >= 0; i--) if (gone.has(lots[i])) lots.splice(i, 1);
+
+    // avenue frontage: merge some pairs of adjacent narrow shop lots into wide podium stores, so the avenue is not
+    // one continuous run of narrow shopfronts. The lots of the featured shops (signage/featured.js: ramen at
+    // (-10, 19), karaoke at (10, 4), izakaya at (10, -30)) are never merged.
+    const fr = mulberry32(0x5A1E);
+    const featured = [['px', 19], ['nx', 4], ['nx', -30]];
+    const isFeatured = (l) => featured.some(([s, z]) => l.fronts[0].side === s && l.z0 < z + 6 && l.z1 > z - 6);
+    const avLots = lots.filter((l) => !l.tower && !l.overlook && l.fronts.length === 1 && l.fronts[0].district === 'avenue' && !isFeatured(l))
+      .sort((p, q) => q.z1 - p.z1);
+    const gone2 = new Set();
+    for (const a of avLots) {
+      if (gone2.has(a) || a.podium) continue;
+      const side = a.fronts[0].side;
+      const b = avLots.find((q) => q !== a && !gone2.has(q) && !q.podium && q.fronts[0].side === side && near(q.z1, a.z0)
+        && (side === 'nx' ? near(q.x0, a.x0) : near(q.x1, a.x1)));
+      if (!b || (a.z1 - b.z0) > 26 || fr() > 0.5) continue;
+      const r = { x0: Math.min(a.x0, b.x0), x1: Math.max(a.x1, b.x1), z0: b.z0, z1: a.z1 };
+      Object.assign(a, r);
+      a.floors = Math.max(a.floors, b.floors);
+      let h = a.groundH + (a.floors - 1) * a.floorH;
+      const cap = heightCap(r.x0, r.x1, r.z0, r.z1);
+      if (h > cap) { a.floors = Math.max(1, Math.floor((cap - a.groundH) / a.floorH) + 1); h = a.groundH + (a.floors - 1) * a.floorH; }
+      a.h = h; a.podium = true;
+      if (a.setback && a.setback.atFloor >= a.floors - 1) a.setback = null;
+      gone2.add(b);
+    }
+    for (let i = lots.length - 1; i >= 0; i--) if (gone2.has(lots[i])) lots.splice(i, 1);
+  }
 
   // ---------------- Side exposure: party walls vs open sides (open sides get real windows) ----------------
   const G = 32, grid = new Map();

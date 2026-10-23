@@ -7,6 +7,7 @@ import {
 import { Batch } from './batch.js';
 import { uTime, uWind } from './materials.js';
 import { mulberry32 } from './util.js';
+import { propGltf } from '../propModels.js';
 
 function meshes(gltf) {
   const out = {};
@@ -34,7 +35,7 @@ function swayPosition() {
 export async function buildLanterns(ctx, L, colorTex, pool, featured) {
   const { scene, assets, layout } = ctx;
   const [gC, gT, gA, paperTex] = await Promise.all([
-    assets.gltf('models/signage/chochin.glb'), assets.gltf('models/signage/chochin_tall.glb'), assets.gltf('models/signage/andon.glb'),
+    propGltf(assets, 'signage', 'chochin'), propGltf(assets, 'signage', 'chochin_tall'), propGltf(assets, 'signage', 'andon'),
     assets.texture('textures/signage/lantern_paper.png', { srgb: true }),
   ]);
   const C = meshes(gC), T = meshes(gT), A = meshes(gA);

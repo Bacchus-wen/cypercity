@@ -13,6 +13,7 @@ import { buildLanterns } from './lanterns.js';
 import { buildBillboards } from './billboards.js';
 import { buildStreet } from './street.js';
 import { buildFeatured } from './featured.js';
+import { artPath } from '../restyleArt.js';
 
 const state = {};
 
@@ -20,7 +21,7 @@ export default {
   async init(ctx) {
     const { scene, assets } = ctx;
     const t0 = performance.now();
-    const img = async (p) => (await assets.texture(p, { srgb: true }))?.image || null;
+    const img = async (p) => (await assets.texture(artPath(p), { srgb: true }))?.image || null;
     const [lightbox, posters, ads] = await Promise.all([
       img('textures/signage/lightbox_atlas.png'), img('textures/signage/posters_atlas.png'), img('textures/signage/ads_grid.png'),
     ]);

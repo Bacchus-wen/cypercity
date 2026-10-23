@@ -2,6 +2,8 @@
 import * as THREE from 'three/webgpu';
 import { NEON } from './util.js';
 
+import { ART_RESTYLE } from '../restyleArt.js';
+
 export function populateFacades(sb, facades, L, layout) {
   const rnd = sb.rnd;
   const lib = sb.lib;
@@ -40,6 +42,20 @@ export function populateFacades(sb, facades, L, layout) {
         const ds = rnd() < 0.7 ? rnd.pick(lib.boxH) : rnd.pick(lib.boxSq);
         const maxH = ds.aspect < 1.5 ? 1.6 : 1.0;
         sb.flat(f, rnd.range(-0.1, 0.1) * w, yc + (maxH > 1.2 ? 0.3 : 0), ds, { width: Math.min(w * 0.8, 6.5), maxH });
+      }
+    }
+
+    // ---- restyle: big street screen over wide avenue storefronts (podium stores), Night City style
+    // (mostly 2:1 landscape screens, some square; the screen is then registered as a blocked area so the blades
+    //  and wall signs placed after it keep clear)
+    if (ART_RESTYLE && d === 'avenue' && w >= 12 && lib.screens.length && rnd() < 0.8) {
+      const wide = lib.screensWide.length && rnd() < 0.7;
+      const ds = rnd.pick(wide ? lib.screensWide : lib.screens);
+      const sw = Math.min(w * (wide ? 0.72 : 0.5), wide ? 13 : 8), sh = sw / ds.aspect;
+      const yc = (f.fasciaY ?? base + 3.5) + 1.2 + sh / 2;
+      const ac = rnd.range(-0.1, 0.1) * w;
+      if (yc + sh / 2 < top - 1 && sb.flat(f, ac, yc, ds, { width: sw, maxH: sh, depth: 0.4, inten: 2.2, housing: [[0.02, 0.02, 0.022], [0.5, 0.4]], lightColor: [0.7, 0.6, 1], importance: 2.5 })) {
+        (f.blocks ||= []).push({ a0: ac - sw / 2 - 0.4, a1: ac + sw / 2 + 0.4, y0: yc - sh / 2 - 0.4, y1: yc + sh / 2 + 0.4 });
       }
     }
 

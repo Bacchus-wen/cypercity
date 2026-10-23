@@ -10,7 +10,10 @@ import { STYLES } from './plan.js';
 import { FACADE_ATTRS, DETAIL_ATTRS, trimAttr, SIDES } from './architecture.js';
 import { slotUV } from './shops.js';
 import { vnoise } from './materials.js';
+import { propGltf } from '../propModels.js';
 
+// exterior ducts (megamass.js buildDucts) record their wall positions: AC units keep 1.1 m clear of them
+const nearDuct = (lot, p) => !!lot.ducts && lot.ducts.some((d) => Math.hypot(d.x - p[0], d.z - p[2]) < 1.1);
 const D = (col, em = 0, rough = 0.6, metal = 0, grime = 0.5) => ({ aCol: [col[0], col[1], col[2], em], aPbr: [rough, metal, 0, grime] });
 const PIPE_GREY = [0.55, 0.55, 0.52], PIPE_DARK = [0.12, 0.12, 0.12], STEEL = [0.3, 0.3, 0.3], RUST = [0.32, 0.18, 0.1];
 const LAUNDRY = [[0.85, 0.85, 0.82], [0.2, 0.3, 0.55], [0.7, 0.2, 0.2], [0.9, 0.75, 0.4], [0.3, 0.5, 0.35], [0.15, 0.15, 0.15], [0.85, 0.55, 0.65]];
@@ -50,8 +53,8 @@ function makeTankMaterials(wetness) {
   return { tank, ptank: tank, stand: steel, pstand: steel, steel, psteel: steel };
 }
 
-async function loadPrimitives(ctx, path) {
-  const g = await ctx.assets.gltf(path);
+async function loadPrimitives(ctx, name) {
+  const g = await propGltf(ctx.assets, 'buildings', name);
   if (!g) return [];
   const prims = [];
   g.scene.updateMatrixWorld(true);
@@ -179,6 +182,7 @@ export async function buildProps(ctx, lots, B, out, { wetness }) {
             const s = (ix + 0.5) * bayW + (r.chance(0.5) ? -1 : 1) * Math.max(0, bayW * 0.5 - 0.45);
             if (s < 0.5 || s > fr.width - 0.5) continue;
             const p = wallPt(fr, s, y, 0.02);
+            if (nearDuct(lot, p)) continue;
             place(acM, p[0], p[1], p[2], rot);
             // bracket
             for (const o of [-0.3, 0.3]) det.beam(wallPt(fr, s + o, y - 0.02, 0.0), wallPt(fr, s + o, y - 0.02, 0.34), 0.03, D(RUST, 0, 0.6, 0.5));
@@ -198,6 +202,7 @@ export async function buildProps(ctx, lots, B, out, { wetness }) {
             const y = startY + iy * lot.floorH + 0.1;
             if (y < sd.y0 + 0.2) continue;
             const p = wallPt(fr, s, y, 0.02);
+            if (nearDuct(lot, p)) continue;
             place(acM, p[0], p[1], p[2], rot);
             for (const o of [-0.3, 0.3]) det.beam(wallPt(fr, s + o, y - 0.02, 0.0), wallPt(fr, s + o, y - 0.02, 0.34), 0.03, D(RUST, 0, 0.6, 0.5));
           }
@@ -212,7 +217,7 @@ export async function buildProps(ctx, lots, B, out, { wetness }) {
       }
 
       // ---------- drainpipe on fronts ----------
-      if (near && front && r.chance(0.75)) {
+      if (near && front && r.chance(0.75) && !lot.volumes[vi]?.soffit) {
         const s = r.chance(0.5) ? 0.22 : fr.width - 0.22;
         const yb = front.baseY > 0 ? front.baseY : 0;
         const po = front.shopType ? 0.28 : 0.12;
@@ -457,9 +462,9 @@ export async function buildProps(ctx, lots, B, out, { wetness }) {
 
   // ---------- instanced meshes ----------
   const meshes = [];
-  const acPrims = await loadPrimitives(ctx, 'models/buildings/ac_unit.glb');
-  const tankPrims = await loadPrimitives(ctx, 'models/buildings/water_tank.glb');
-  const ptankPrims = await loadPrimitives(ctx, 'models/buildings/panel_tank.glb');
+  const acPrims = await loadPrimitives(ctx, 'ac_unit');
+  const tankPrims = await loadPrimitives(ctx, 'water_tank');
+  const ptankPrims = await loadPrimitives(ctx, 'panel_tank');
   const acMats = makeACMaterials(wetness);
   const tankMats = makeTankMaterials(wetness);
   const mk = (prims, mats, list, fallback) => {

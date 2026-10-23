@@ -139,7 +139,7 @@ export default {
       update(dt, st) {
         const s = st.speed;
         let want = 'idle';
-        if (s > 0.35) want = s < 1.6 && has('walk_slow') ? 'walk_slow' : s < 3.2 || !has('walk_fast') ? 'walk' : 'walk_fast';
+        if (s > 0.35) want = s < 1.6 && has('walk_slow') ? 'walk_slow' : s < 3.2 || !has('walk_fast') ? 'walk' : s < 4.4 || !has('run') ? 'walk_fast' : 'run';
         if (!has(want)) want = has('walk') ? 'walk' : want;
         // hysteresis: avoid stacking cross-fades (partial weights blend toward the bind/A-pose)
         if (want !== cand) { cand = want; candT = 0; }
@@ -152,8 +152,8 @@ export default {
         crouchK += ((st.crouch ? 1 : 0) - crouchK) * Math.min(1, dt * 10);
         leanK += (Math.min(1, s / 7.8) - leanK) * Math.min(1, dt * 6);
         airK += ((st.grounded ? 0 : 1) - airK) * Math.min(1, dt * 8);
-        // sprint lean + crouch squash (approximate — the crowd rig has no crouch/run clips)
-        lean.rotation.x = -leanK * 0.22 - crouchK * 0.18;
+        // sprint lean + crouch squash (approximate — the crowd rig has no crouch clip; the run clip leans by itself)
+        lean.rotation.x = -leanK * (has('run') ? 0.08 : 0.22) - crouchK * 0.18;
         lean.position.y = -crouchK * 0.42 + airK * 0.05;
         lean.scale.y = 1 - crouchK * 0.12;
         c.update?.(dt);

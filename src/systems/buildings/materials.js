@@ -7,6 +7,7 @@ import {
   attribute, uv, vec2, vec3, vec4, float, floor, fract, mix, step, smoothstep, clamp, abs, min, max, sin, cos, dot,
   texture, positionWorld, cameraPosition, normalize, time, fwidth, length, normalMap, normalView, uniform, mod, pow, exp,
 } from 'three/tsl';
+import { TOD } from '../../engine/timeOfDay.js';
 
 // ---------- small hash / noise helpers (pure node graph) ----------
 export const h21 = (p) => {
@@ -66,7 +67,7 @@ const aaRect = (p, x0, x1, y0, y1) => {
 };
 
 // --------------------------------------------------------------------------------------------------
-export function createFacadeMaterial({ albedo, normal, interior, wetness, noise }) {
+export function createFacadeMaterial({ albedo, normal, interior, wetness, noise, restyle = false }) {
   const nz = (p) => texture(noise, p);
   const m = new THREE.MeshStandardNodeMaterial();
   const A = attribute('aWin', 'vec4');
@@ -79,6 +80,10 @@ export function createFacadeMaterial({ albedo, normal, interior, wetness, noise 
   const fuv = uv();
   const P = positionWorld;
   const sd = floor(seed.mul(9973.0).add(0.5)); // quantized: interpolated attributes jitter by ULPs
+  // restyle: building-level choices (palette, paint, graphics) hash the per-lot tint (same on every face and volume
+  // of a building; the window seed above differs per face). tint < 0 marks neutral structures (sky bridges).
+  const bsd = floor(abs(tint).mul(9973.0).add(0.5));
+  const plainB = step(tint, -0.5);
 
   const k0 = step(kind, 0.5);
   const k1 = step(0.5, kind).mul(step(kind, 1.5));
@@ -100,15 +105,28 @@ export function createFacadeMaterial({ albedo, normal, interior, wetness, noise 
   const macro = nz(vec2(P.x.add(P.z), P.y).mul(0.015).add(sd.mul(0.0137))).r;
   const blendM = smoothstep(0.38, 0.62, macro);
   const a1 = atlasSample(albedo, tuv).rgb, a2 = atlasSample(albedo, tuv2).rgb;
-  let wallAlb = mix(a1, a2, blendM);
+  // restyle: layers with a structural pattern (tiles, panels, bricks: 0 1 4 5 6) stay single-scale, a second scale
+  // would overlay misaligned seams; the anti-repeat blend is kept for plaster, corrugated metal and roofs
+  const structL = restyle ? step(layer, 1.5).add(step(3.5, layer).mul(step(layer, 6.5))) : float(0);
+  const blendR = blendM.mul(float(1).sub(structL));
+  let wallAlb = mix(a1, a2, blendR);
   const n1 = atlasSample(normal, tuv).rgb, n2 = atlasSample(normal, tuv2).rgb;
-  const wallNrm = mix(n1, n2, blendM);
+  const wallNrm = mix(n1, n2, blendR);
 
   // building tint + macro dirt
   const pal = vec3(0.5).add(cos(vec3(0.0, 2.1, 4.2).add(tint.mul(6.283))).mul(0.5));
-  const tintCol = mix(vec3(1.0), pal, 0.22).mul(mix(0.72, 1.12, h21(vec2(sd, 3.1))));
+  // restyle (painted atlas): Edgerunners S2 palette per building (neutral, slate blue, warm grey, teal grey, dark)
+  // instead of the rainbow cosine tint
+  const hp = h21(vec2(bsd, 3.7));
+  const s2Tint = mix(mix(mix(vec3(1.0), vec3(0.86, 0.93, 1.05), step(0.32, hp)), vec3(1.05, 0.98, 0.9), step(0.56, hp)),
+    mix(vec3(0.88, 1.0, 0.98), vec3(0.7, 0.7, 0.73), step(0.9, hp)), step(0.76, hp));
+  // ~15% of buildings are painted in a muted S2 colour (teal, oxide red, mustard, slate blue)
+  const hpaint = h21(vec2(bsd, 4.9)), hpc = h21(vec2(bsd, 5.2));
+  const paintCol = mix(mix(vec3(0.62, 0.95, 0.92), vec3(1.25, 0.62, 0.55), step(0.3, hpc)), mix(vec3(1.18, 1.0, 0.55), vec3(0.72, 0.85, 1.15), step(0.8, hpc)), step(0.55, hpc));
+  const s2Final = mix(mix(s2Tint, paintCol, step(hpaint, 0.15)), vec3(0.85, 0.88, 0.92), plainB);
+  const tintCol = restyle ? s2Final.mul(mix(0.8, 1.06, h21(vec2(bsd, 3.1)))) : mix(vec3(1.0), pal, 0.22).mul(mix(0.72, 1.12, h21(vec2(sd, 3.1))));
   const dirt = nz(vec2(P.x.add(P.z.mul(0.7)), P.y.mul(1.6)).mul(0.016)).g;
-  wallAlb = wallAlb.mul(tintCol).mul(mix(0.7, 1.05, dirt));
+  wallAlb = wallAlb.mul(tintCol).mul(restyle ? mix(0.86, 1.03, dirt) : mix(0.7, 1.05, dirt));
 
   // ---------- window grid ----------
   const cx = fuv.x.div(bayW);
@@ -119,7 +137,13 @@ export function createFacadeMaterial({ albedo, normal, interior, wetness, noise 
   const cellId = vec2(ix.add(sd.mul(0.731)), iy.add(sd.mul(0.377)));
   const hA = h21(cellId), hB = h21(cellId.add(17.1)), hC = h21(cellId.add(41.7)), hD = h21(cellId.add(73.3));
   const zone = step(0.0, ry).mul(step(fuv.y, topY.sub(0.5))).mul(step(kind, 3.5));
-  const present = mix(float(1), step(hD, 0.42), k3).mul(zone);
+  // restyle graphics selection (building level); on curtain walls the band floor becomes a windowless spandrel
+  const gsel = h21(vec2(bsd, 5.5)).add(plainB);
+  const nB = floor(mix(float(3), float(6.99), h21(vec2(bsd, 7.7))));
+  // (smoothed over one pixel at the floor boundaries: the band edges do not crawl at a distance)
+  const bandPhase = mod(cy, nB), fwy = fwidth(cy);
+  const bandOn = restyle ? smoothstep(fwy.negate(), fwy, bandPhase).mul(float(1).sub(smoothstep(float(1).sub(fwy), float(1).add(fwy), bandPhase))).mul(step(gsel, 0.22)) : float(0);
+  const present = mix(float(1), step(hD, 0.42), k3).mul(zone).mul(float(1).sub(bandOn.mul(k2)));
 
   // window rect in cell coords
   const wwE = mix(ww, ww.mul(0.45), k3);
@@ -215,7 +239,14 @@ export function createFacadeMaterial({ albedo, normal, interior, wetness, noise 
 
   const dim = step(litP, hB).mul(step(hB, litP.add(0.35))).mul(present);
   const glassEm = seen.mul(lightCol).mul(intensity.mul(lit).add(dim.mul(0.07)));
-  const glassAlb = seen.mul(0.05).add(vec3(0.008, 0.01, 0.013));
+  let glassAlb = seen.mul(0.05).add(vec3(0.008, 0.01, 0.013));
+  if (restyle) {
+    // anime glass: unlit panes get a cool sky tint and, on some windows, two diagonal shine strokes
+    const dg = pxw.mul(0.7).add(pyw);
+    const shineFade = float(1).sub(smoothstep(0.08, 0.3, max(fwidth(cx), fwidth(cy))));
+    const shine = smoothstep(0.06, 0.0, abs(dg.sub(0.55))).add(smoothstep(0.025, 0.0, abs(dg.sub(0.78))).mul(0.7)).mul(step(0.55, h21(cellId.add(23.1)))).mul(shineFade);
+    glassAlb = glassAlb.add(mix(vec3(0.02, 0.03, 0.045), vec3(0.06, 0.08, 0.1), pyw).add(vec3(0.16, 0.19, 0.22).mul(shine)).mul(float(1).sub(lit)).mul(float(1).sub(cover.mul(0.7))));
+  }
 
   // frame colour per building
   const fsel = h21(vec2(sd, 8.8));
@@ -236,7 +267,20 @@ export function createFacadeMaterial({ albedo, normal, interior, wetness, noise 
 
   let wall = wallAlb.mul(mix(1.0, 0.82, slab)).mul(float(1).sub(groundGrime.mul(0.4)));
   wall = mix(wall, vec3(0.42, 0.41, 0.39).mul(tintCol), sillMask.mul(0.8));
-  wall = wall.mul(mix(1.0, 0.68, streakAll.mul(wet)));
+  wall = wall.mul(mix(1.0, restyle ? 0.8 : 0.68, streakAll.mul(wet)));
+  if (restyle) {
+    // Night City supergraphics on some buildings: a painted spandrel band every few floors (the whole floor on curtain
+    // walls), or a vertical corner stripe (red / off-white / black / teal). Wall only: windows composite over it.
+    // Edges are smoothed over one pixel (fwidth) so the graphics do not crawl at a distance.
+    const ai = h21(vec2(bsd, 6.6));
+    const accent = mix(mix(vec3(0.5, 0.07, 0.06), vec3(0.78, 0.78, 0.74), step(0.45, ai)), mix(vec3(0.05, 0.05, 0.06), vec3(0.08, 0.33, 0.33), step(0.9, ai)), step(0.7, ai));
+    const aaS = (e, x) => smoothstep(e.sub(fwidth(x)), e.add(fwidth(x)), x);
+    const bandM = bandOn.mul(mix(aaS(float(0.12), fy).mul(float(1).sub(aaS(y0.sub(0.03), fy))), float(1), k2));
+    const sx0 = mix(float(0.35), float(0.8), h21(vec2(bsd, 8.1))), sw = mix(float(1.1), float(2.2), h21(vec2(bsd, 8.4)));
+    const stripeM = aaS(sx0, fuv.x).mul(float(1).sub(aaS(sx0.add(sw), fuv.x))).mul(step(0.22, gsel)).mul(step(gsel, 0.36));
+    const paintM = clamp(bandM.add(stripeM), 0, 1).mul(zone).mul(float(1).sub(kRoof));
+    wall = mix(wall, accent.mul(mix(0.82, 1.0, dirt)).mul(mix(1.0, 0.75, streakAll.mul(wet))), paintM.mul(0.94));
+  }
   const wallLum = dot(wallAlb, vec3(0.3, 0.59, 0.11));
   const wallRough = mix(float(0.9).sub(wallLum.mul(0.2)), float(0.32), clamp(wet.mul(0.35).add(streakAll.mul(wet).mul(0.55)), 0, 1));
 
@@ -267,11 +311,18 @@ export function createFacadeMaterial({ albedo, normal, interior, wetness, noise 
   const metalC = frame2.mul(step(fsel, 0.45)).mul(0.7);
   let emC = glassEm.mul(glass2).add(farEm.mul(aaF));
   emC = emC.mul(float(1).sub(kRoof));
+  // night facade fill (restyle): a cool sky-glow wash on walls, stronger higher up and on walls facing the moon, so
+  // building masses read as blue-grey shapes instead of sinking to black. Scaled by TOD.fill only (added after the
+  // window-light scale below, so the two controls stay independent).
+  const moonFace = clamp(dot(N, vec3(0.34, 0.0, -0.94)), 0, 1);
+  const fillTerm = restyle
+    ? albedoC.mul(wallW).mul(vec3(0.05, 0.065, 0.09)).mul(mix(0.6, 1.5, smoothstep(5.0, 70.0, P.y))).mul(mix(0.75, 1.25, moonFace)).mul(TOD.fill).mul(float(1).sub(kRoof))
+    : vec3(0);
 
   m.colorNode = vec4(albedoC, 1);
   m.roughnessNode = clamp(roughC, 0.02, 1.0);
   m.metalnessNode = metalC;
-  m.emissiveNode = emC;
+  m.emissiveNode = emC.mul(TOD.windows).add(fillTerm); // time-of-day: fewer lit windows read at dusk
   const wallN = normalMap(wallNrm, vec2(mix(0.6, 0.25, streakAll.mul(wet))));
   const nMask = wallW.mul(float(1).sub(puddle.mul(kRoof)));
   m.normalNode = normalize(mix(normalView, wallN, nMask));
