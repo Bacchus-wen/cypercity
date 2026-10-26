@@ -125,8 +125,30 @@ export class Soundscape {
     this.tireIn = c.loop('tireHiss', this.tireInLP);
     this.gear = 1; this.rpm = 900; this.carPrev = null; this.carSpeed = 0;
 
+    // --- canal (restyle map): water lapping near the embankment, gulls over the harbour canal
+    this.canal = !!L.river?.canal && new URLSearchParams(location.search).get('audio') !== 'legacy';
+    if (this.canal) { this.water = c.loop('waterLap', c.exterior); this.nextGull = 6 + this.rng() * 10; }
+    // --- plaza busker (restyle map): a positional guitar loop in front of the deck steps
+    if (this.canal && L.plaza) {
+      const P = L.plaza, pan = c.panner(c.exterior, { hrtf: true, ref: 3.5, rolloff: 1.4 });
+      pan.connect(c.gain(0.2, c.reverbSend));
+      c.setPos(pan, P.x0 + 12 + Math.round(P.deckY / 0.3) * 0.42 + 4.0, 1.2, (P.z0 + P.z1) / 2 + 11); // (crowd/agents.js busker spot)
+      this.busker = c.loop('busker', pan, { gain: 0.55 });
+    }
+
     // --- music
-    this.musicLoop = c.loop('music', c.music, { gain: 1, offset: 0 });
+    this.radioMode = new URLSearchParams(location.search).get('audio') !== 'legacy';
+    if (this.radioMode) {
+      // restyle: a car radio with stations (N in a car); the choice also scores the walk
+      this.stations = [
+        { id: 'music2', name: 'SOLANO FM 104.0', show: 'DUSK DRIVE', song: 'LAST LIGHT', artist: 'the House Band' },
+        { id: 'music3', name: 'CANAL WAVE 88.7', show: 'LOW TIDE', song: 'SLOW BOATS', artist: 'Mira Okafor' },
+        { id: null, name: 'RADIO OFF', show: 'JUST THE CITY' },
+      ];
+      this.stationIdx = 0;
+      this.stationLoops = this.stations.map((st, i) => (st.id ? c.loop(st.id, c.music, { gain: i === 0 ? 0.55 : 0, offset: 0 }) : null));
+      this.musicLoop = this.stationLoops[0];
+    } else this.musicLoop = c.loop('music', c.music, { gain: 1, offset: 0 });
 
     // event bus hooks
     this._on = [];
@@ -186,6 +208,27 @@ export class Soundscape {
     if (this.metalPos) c.set(this.metal.gain.gain, 0.7 * rain * this.metalPos.k, 0.25);
     else c.set(this.metal.gain.gain, 0, 0.3);
     c.set(this.crowd.gain.gain, 0.3 * (this.crowdDensity ?? 0), 0.6);
+    if (this.canal) this.busCues(ctx);
+    // pigeons (restyle map): wing clatter where a flock takes off
+    if (this.canal && !this._pigeonHook && ctx.api?.landmarks?.pigeons) {
+      this._pigeonHook = true;
+      ctx.api.landmarks.pigeons.onTakeoff = (x, y, z) => this.busOneShot('flutter', { x, z }, 0.6);
+    }
+    if (this.canal) {
+      const R = this.L.river, dW = Math.max(0, Math.abs(p.x - R.xCenter) - R.halfWidth);
+      const dZ = Math.max(0, p.z - R.zStart, R.zEnd - p.z); // beyond the canal ends
+      const k = (1 - smooth(2, 45, Math.hypot(dW, dZ))) * (1 - 0.7 * smooth(6, 30, h)); // quieter high above the street
+      c.set(this.water.gain.gain, 0.32 * k * (1 - 0.6 * this.inCarK), 0.4);
+      this.nextGull -= dt;
+      if (this.nextGull <= 0) {
+        this.nextGull = 9 + this.rng() * 18;
+        const near = 1 - smooth(10, 90, dW);
+        if (near > 0.05 || h > 14) c.oneShot('gull' + Math.floor(this.rng() * 3), c.exterior, { gain: 0.16 * Math.max(near, h > 14 ? 0.6 : 0), rate: 0.9 + this.rng() * 0.2 });
+      }
+    }
+
+    // restyle: the score plays like the car radio - full in a vehicle, softer on foot
+    if (this.radioMode) this.stationLoops.forEach((h, i) => { if (h) c.set(h.gain.gain, i === this.stationIdx ? 0.55 + 0.45 * this.inCarK : 0, 0.4); });
 
     this.updateTrain(dt, ctx, p);
     this.updateEvents(dt, ctx, p, w);
@@ -385,7 +428,9 @@ export class Soundscape {
     const pan = c.panner(c.exterior, { hrtf: false, ref: 40, rolloff: 1.1 });
     lp.connect(occ).connect(pan);
     const send = c.gain(0.55, c.reverbSend); occ.connect(send);
-    const h = c.loop(forcePath || r() < 0.6 ? 'sirenWail' : 'sirenHiLo', lp, { gain: 0, offset: r() });
+    // (restyle: American wail only; the hi-lo two-tone is the original's European / Japanese siren)
+    const hilo = !forcePath && r() >= 0.6 && !this.radioMode;
+    const h = c.loop(hilo ? 'sirenHiLo' : 'sirenWail', lp, { gain: 0, offset: r() });
     this.siren = { a, b, total, speed, s: 0, y: path.y ?? 1.5, path, h, lp, occ, pan, send, prevD: null };
   }
 
@@ -412,6 +457,39 @@ export class Soundscape {
     c.set(S.lp.frequency, clamp(16000 * Math.exp(-d / 260), 900, 16000), 0.1);
     const sameStreet = S.path.axis === 'z' ? Math.abs(p.x - S.path.line) < 12 : Math.abs(p.z - S.path.line) < 10;
     c.set(S.occ.frequency, sameStreet || p.y > 15 ? 20000 : 1400, 0.4);
+  }
+
+  // car radio (restyle): next station; returns its card for the HUD
+  radioNext() {
+    if (!this.radioMode) return null;
+    this.stationIdx = (this.stationIdx + 1) % this.stations.length;
+    return this.station();
+  }
+
+  station() { return this.radioMode ? this.stations[this.stationIdx] : null; }
+
+  // city buses (restyle map): kneel hiss when one pulls up at a shelter, the door chime when its doors open
+  busCues(ctx) {
+    const buses = ctx.api?.vehicles?.buses;
+    if (!buses?.length) return;
+    const st = this._busSt || (this._busSt = buses.map(() => ({ dwell: false, door: false })));
+    buses.forEach((b, i) => {
+      const s = st[i], dwell = b.dwell > 0, door = !!b.doorOpen;
+      if (dwell && !s.dwell) this.busOneShot('busHiss', b.pos, 0.55);
+      if (door && !s.door) this.busOneShot('busChime', b.pos, 0.35);
+      if (!door && s.door) this.busOneShot('busHiss', b.pos, 0.3);
+      s.dwell = dwell; s.door = door;
+    });
+  }
+
+  busOneShot(name, pos, gain) {
+    const c = this.core;
+    const pan = c.panner(c.exterior, { hrtf: true, ref: 4, rolloff: 1.3 });
+    const send = c.gain(0.25, c.reverbSend); pan.connect(send);
+    c.setPos(pan, pos.x, 1.4, pos.z);
+    const s = c.oneShot(name, pan, { gain, rate: 0.97 + this.rng() * 0.06 });
+    const cleanup = () => { try { pan.disconnect(); send.disconnect(); } catch { /* */ } };
+    if (s) s.addEventListener('ended', cleanup); else cleanup();
   }
 
   horn(p) {

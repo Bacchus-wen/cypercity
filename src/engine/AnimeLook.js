@@ -1,4 +1,4 @@
-// Anime / cel look, enabled with ?look=anime (the photoreal look stays the default for side-by-side comparison).
+// Anime / cel look: the default look (?look=legacy = the original photoreal look for side-by-side comparison).
 //
 // 1. AnimeLightingModel replaces three's PhysicalLightingModel in every MeshStandard/MeshPhysical node material, so the
 //    whole city changes in one place. Direct light is banded: a hard terminator, plus light intensity posterized in
@@ -15,11 +15,11 @@ import { Material, MeshStandardNodeMaterial, MeshPhysicalNodeMaterial, PhysicalL
 import {
   Fn, float, vec2, vec3, vec4, uniform, normalView, positionViewDirection, BRDF_GGX, BRDF_Lambert, diffuseContribution,
   specularColorBlended, roughness, luminance, materialReference, smoothstep, floor, fract, exp2, log2, max, min, mix, screenUV, screenSize,
-  convertToTexture, perspectiveDepthToViewZ, unpackRGBToNormal, abs, dot, clamp, select, length, step,
+  convertToTexture, perspectiveDepthToViewZ, unpackRGBToNormal, abs, dot, clamp, select, length, step, normalWorld,
 } from 'three/tsl';
 import { TOD_PRESET } from './timeOfDay.js';
 
-export const ANIME = typeof location !== 'undefined' && new URLSearchParams(location.search).get('look') === 'anime';
+export const ANIME = typeof location !== 'undefined' && new URLSearchParams(location.search).get('look') !== 'legacy';
 
 export const animeParams = {
   // lighting
@@ -29,6 +29,7 @@ export const animeParams = {
   bandSoft: uniform(0.12),         // edge width of an irradiance band (in steps)
   specThreshold: uniform(0.3),     // GGX value above which a highlight shape appears
   specPeak: uniform(0.9),
+  groundSpec: uniform(0.28),       // hard highlight strength on up-facing environment surfaces (wet ground)
   shadowFloor: uniform(0.025),     // lowest irradiance band (keeps dark forms readable)
   figureFloor: uniform(0.07),      // higher floor for characters and vehicles: never a black silhouette
   shadeTint: uniform(vec3(0.82, 0.74, 1.12)), // designed shadow colour: the dark band shifts to violet, not just darker
@@ -80,7 +81,11 @@ class AnimeLightingModel extends PhysicalLightingModel {
     // grazing lights get no hard highlight shapes: the low dusk sun (9 deg) otherwise paints one big flat glint
     // patch on wet ground right in front of the camera
     // (environment surfaces only: figures, i.e. characters and vehicles, keep their grazing paint / glass highlights)
-    const hard = smoothstep(th.mul(0.8), th.mul(1.25), luminance(ggx)).mul(mix(smoothstep(0.12, 0.3, dotNL), float(1), figure));
+    // up-facing environment surfaces (wet ground) keep only a faint highlight shape: lamps close to wet paving
+    // otherwise paint large blown-out "egg" blobs; their reflections come from the SSR colour blocks instead
+    const ground = smoothstep(0.82, 0.95, normalWorld.y).mul(float(1).sub(figure));
+    const hard = smoothstep(th.mul(0.8), th.mul(1.25), luminance(ggx)).mul(mix(smoothstep(0.12, 0.3, dotNL), float(1), figure))
+      .mul(mix(float(1), P.groundSpec, ground));
     const tint = specularColorBlended.div(luminance(specularColorBlended).max(0.02)).min(vec3(1.5));
     reflectedLight.directSpecular.addAssign(irradiance.mul(hard).mul(P.specPeak).mul(tint));
   }

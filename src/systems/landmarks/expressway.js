@@ -45,7 +45,7 @@ export function buildExpressway(ctx, tex, root) {
     if (x > river.xCenter - river.halfWidth - 18 && x < river.xCenter + river.halfWidth + 18) continue;
     pierXs.push(x);
   }
-  pierXs.push(-13, 13, river.xCenter - river.halfWidth - 14, river.xCenter + river.halfWidth + 14, river.xCenter);
+  pierXs.push(...(ctx.layout.avenue.medianHalf ? [0] : [-13, 13]), river.xCenter - river.halfWidth - 14, river.xCenter + river.halfWidth + 14, river.xCenter);
   const colGeo = new THREE.CylinderGeometry(1, 1, 1, 12, 1);
   const capProf = [[-7.2, 0], [-7.2, -0.8], [-1.8, -2.6], [1.8, -2.6], [7.2, -0.8], [7.2, 0]];
   for (const px of pierXs) {

@@ -28,6 +28,13 @@ function applyLevels(fade = 0.15) {
   c.set(c.music.gain, S.prefs.music ? MUSIC_LEVEL : 0, 1.5);
 }
 
+// the restyle's own score (music2) by default; ?audio=legacy = the original music. Only the used one is generated.
+export const AUDIO_LEGACY = typeof location !== 'undefined' && new URLSearchParams(location.search).get('audio') === 'legacy';
+// (restyle-map-only sounds are not synthesized for the original soundscape or the original map)
+const MAP2_SFX = ['waterLap', 'gull0', 'gull1', 'gull2', 'busker', 'busHiss', 'busChime', 'flutter'];
+const MAP_LEGACY = new URLSearchParams(location.search).get('map') === 'legacy';
+const SKIP = AUDIO_LEGACY ? ['music2', 'music3', ...MAP2_SFX] : ['music', ...(MAP_LEGACY ? MAP2_SFX : [])];
+
 function startGeneration() {
   const onMsg = (d) => {
     if (d.type === 'buffer') S.core.addRaw(d.name, { channels: d.channels, sampleRate: d.sampleRate, loop: d.loop });
@@ -38,7 +45,7 @@ function startGeneration() {
     S.worker = new Worker(new URL('./synth.worker.js', import.meta.url), { type: 'module' });
     S.worker.onmessage = (e) => onMsg(e.data);
     S.worker.onerror = (e) => { e.preventDefault?.(); console.warn('[audio] worker error, falling back to main thread', e.message); S.worker = null; mainThreadGeneration(onMsg); };
-    S.worker.postMessage({});
+    S.worker.postMessage({ skip: SKIP });
   } catch (e) {
     mainThreadGeneration(onMsg);
   }
@@ -52,6 +59,7 @@ async function mainThreadGeneration(onMsg) {
     const next = () => {
       if (i >= ORDER.length) { onMsg({ type: 'done' }); return; }
       const name = ORDER[i++];
+      if (SKIP.includes(name)) { next(); return; }
       try { const r = generate(name); onMsg({ type: 'buffer', name, ...r }); } catch (e) { onMsg({ type: 'error', name, message: String(e) }); }
       (window.requestIdleCallback || setTimeout)(next, { timeout: 500 });
     };
@@ -92,6 +100,8 @@ export default {
       toggleMute() { api.mute(!S.prefs.muted); },
       setMusic(on) { S.prefs.music = !!on; api.musicOn = S.prefs.music; savePrefs(); applyLevels(); },
       toggleMusic() { api.setMusic(!S.prefs.music); },
+      radioNext() { return S.scape?.radioNext?.() ?? null; },
+      radioStation() { return S.scape?.station?.() ?? null; },
       isMuted: S.prefs.muted,
       musicOn: S.prefs.music,
       started: false,
@@ -139,6 +149,7 @@ export default {
       cam.getWorldPosition(S._v); cam.getWorldQuaternion(S._q);
       S._f.set(0, 0, -1).applyQuaternion(S._q); S._u.set(0, 1, 0).applyQuaternion(S._q);
       const L = c.ac.listener;
+      if (!Number.isFinite(S._v.x + S._v.y + S._v.z + S._f.x + S._f.y + S._f.z + S._u.x + S._u.y + S._u.z)) return; // (skip a transient bad camera frame)
       if (L.positionX) {
         L.positionX.value = S._v.x; L.positionY.value = S._v.y; L.positionZ.value = S._v.z;
         L.forwardX.value = S._f.x; L.forwardY.value = S._f.y; L.forwardZ.value = S._f.z;

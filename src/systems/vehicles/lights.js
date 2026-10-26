@@ -13,7 +13,7 @@ const _s1 = new THREE.Vector3(1, 1, 1);
 
 // head PointLights of the nearest cars: in the anime look their wet-road highlights are drawn as hard shapes, which at
 // full strength read as solid white eggs on the road; softer there, and scaled by the time of day (dusk ~30%)
-const ANIME_V = typeof location !== 'undefined' && new URLSearchParams(location.search).get('look') === 'anime';
+const ANIME_V = typeof location !== 'undefined' && new URLSearchParams(location.search).get('look') !== 'legacy'; // anime look is the default
 const HEAD_I = ANIME_V ? 0.7 * Math.max(0.3, TOD.lights) : 9;
 const TAIL_K = ANIME_V ? 0.35 : 1;
 const SPOT_I = ANIME_V ? 90 * Math.max(0.3, TOD.lights) : 260; // hero / nearest car spotlights, same reason

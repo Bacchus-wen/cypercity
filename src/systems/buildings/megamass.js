@@ -337,7 +337,9 @@ export function buildSkybridges(lots, B, L, IX) {
   // across the avenue (bridge along x between x = -fr0 and +fr0, centred at z = mid)
   const avPairs = pairs('px', -fr0, 'nx', fr0, false);
   // (the bridge nearest the street camera stays high so it frames the view instead of blocking it)
-  for (const zt of [-40, -96, -206, -272, -345, -392]) {
+  // (bridge target positions: the restyle map derives its own; the original map keeps the hand-picked list)
+  const avTargets = L.plaza ? [-35, -110, -185, -250, -342, -415] : [-40, -96, -206, -272, -345, -392];
+  for (const zt of avTargets) {
     // (min 15 m: the facade-to-facade cables of cables.js cross the avenue up to ~13.7 m incl. fittings)
     place(avPairs, zt, zt > -50 ? 17 : 15,
       (mid, y, bw, bh) => ({ x0: -fr0 + 0.05, x1: fr0 - 0.05, y0: y, y1: y + bh, z0: mid - bw / 2, z1: mid + bw / 2 }),
@@ -349,7 +351,9 @@ export function buildSkybridges(lots, B, L, IX) {
   }
   // across cross streets (bridge along z between the facing walls), near the avenue but clear of the overlook
   const cs = L.crossStreets, half = cs.roadHalfWidth + cs.sidewalkWidth;
-  for (const [zc, xt] of [[-180, 24], [-180, -24], [-300, -24], [-300, 26], [-60, -26]]) {
+  const zsC = L.crossStreets.zs, xm = fr0 + 14;
+  const crTargets = L.plaza ? [[zsC[1], xm], [zsC[1], -xm], [zsC[2], -xm], [zsC[2], xm], [zsC[0], -xm]] : [[-180, 24], [-180, -24], [-300, -24], [-300, 26], [-60, -26]];
+  for (const [zc, xt] of crTargets) {
     const cp = pairs('pz', zc - half, 'nz', zc + half, true);
     place(cp, xt, 14,
       (mid, y, bw, bh) => ({ x0: mid - bw / 2, x1: mid + bw / 2, y0: y, y1: y + bh, z0: zc - half + 0.05, z1: zc + half - 0.05 }),

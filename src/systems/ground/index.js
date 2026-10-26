@@ -5,7 +5,7 @@ import { G, heightAt, sidewalkPolys } from './plan.js';
 import { buildGroundGeometry } from './geometry.js';
 import { buildMarkingAtlas } from './markings.js';
 import { roadMaterial } from './roadMaterial.js';
-import { sidewalkMaterial, curbMaterial, promenadeMaterial, alleyMaterial, wallMaterial } from './surfaces.js';
+import { sidewalkMaterial, curbMaterial, promenadeMaterial, alleyMaterial, wallMaterial, plazaMaterial } from './surfaces.js';
 import { buildDecals } from './decals.js';
 import { updateWetUniforms } from '../../materials/wet.js';
 import { vec3 } from 'three/tsl';
@@ -48,7 +48,25 @@ function addColliders(ctx, geo) {
     const side = poly.side;
     const xr = side * G.avHalf, xi = side * (G.avHalf + G.avSide);
     const zHi = Math.max(...zs), zLo = Math.min(...zs);
-    box(Math.min(xr, xi), Math.max(xr, xi), -0.2, G.curbH, zLo, zHi);
+    if (poly.median) { box(Math.min(...xs), Math.max(...xs), -0.2, G.curbH, zLo, zHi); continue; } // planted median kerb
+    const B = G.bay;
+    if (side > 0 && B && B.z1 + B.t < zHi && B.z0 - B.t > zLo) {
+      // avenue strip minus the pull-in bay
+      box(xr, xi, -0.2, G.curbH, B.z1 + B.t, zHi);
+      box(xr, xi, -0.2, G.curbH, zLo, B.z0 - B.t);
+      box(B.x1, xi, -0.2, G.curbH, B.z0 - B.t, B.z1 + B.t);
+      // the tapered ends: a cuboid lying along each diagonal kerb, on the sidewalk side
+      for (const [za, zb] of [[B.z1 + B.t, B.z1], [B.z0 - B.t, B.z0]]) {
+        const dx = B.x1 - xr, dz = zb - za, len = Math.hypot(dx, dz), ux = dx / len, uz = dz / len;
+        let nx = uz, nz = -ux; // normal of the diagonal, pointing away from the bay (toward the sidewalk)
+        if (nx * (B.x1 - xr) + nz * (za - (B.z0 + B.z1) / 2) < 0) { nx = -nx; nz = -nz; }
+        const h = (Math.abs(dx * dz) / len) / 2 + 0.2; // half the triangle's height (+ margin)
+        const cx = (xr + B.x1) / 2 + nx * h, cz = (za + zb) / 2 + nz * h;
+        const yaw = Math.atan2(-uz, ux); // rotation about +Y taking local +X onto (ux, uz)
+        world.createCollider(RAPIER.ColliderDesc.cuboid(len / 2, (G.curbH + 0.2) / 2, h)
+          .setTranslation(cx, (G.curbH - 0.2) / 2, cz).setRotation({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) }).setFriction(0.9));
+      }
+    } else box(Math.min(xr, xi), Math.max(xr, xi), -0.2, G.curbH, zLo, zHi);
     const xEnd = side > 0 ? Math.max(...xs) : Math.min(...xs);
     // arms: any points at xEnd define z ranges
     const armZ = poly.pts.filter((p) => p[0] === xEnd).map((p) => p[1]).sort((a, b) => a - b);
@@ -107,6 +125,7 @@ export default {
       promenade: promenadeMaterial(T),
       alley: alleyMaterial(T),
       wall: wallMaterial(T),
+      plaza: geo.plaza ? plazaMaterial(T) : null,
     };
     const dbg = new URLSearchParams(location.search).get('gdebug');
     if (dbg && mats.road.userData.debug?.[dbg]) { const n = mats.road.userData.debug[dbg]; mats.road.emissiveNode = vec3(n); mats.road.colorNode = vec3(0); }
@@ -117,6 +136,7 @@ export default {
     };
     add(geo.base, mats.road, 'ground.road');
     add(geo.sidewalk, mats.sidewalk, 'ground.sidewalk');
+    if (geo.plaza) add(geo.plaza, mats.plaza, 'ground.plaza');
     add(geo.curb, mats.curb, 'ground.curb');
     add(geo.alley, mats.alley, 'ground.alley');
     add(geo.promenade, mats.promenade, 'ground.promenade');

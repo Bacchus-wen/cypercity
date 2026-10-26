@@ -10,10 +10,41 @@ import { buildRiver } from './river.js';
 import { buildTrees } from './trees.js';
 import { buildBridge } from './bridge.js';
 import { buildProps } from './props.js';
+import { buildPalms } from './palms.js';
+import { buildPlaza, plazaPalmSpots } from './plaza.js';
+import { buildIntersectionHolos } from './holo.js';
+import { buildStreetKit } from './streetkit.js';
+import { buildBoats } from './boats.js';
+import { buildSpire } from './spire.js';
+import { buildDroneShow } from './droneshow.js';
+import { buildSprayBooth } from '../player/spray.js';
+import { buildPigeons } from './pigeons.js';
+import { buildTacoTruck } from '../player/taco.js';
 
 const optional = async (name, fn) => {
   try { return await fn(); } catch (e) { console.error(`[landmarks] ${name} failed`, e); return null; }
 };
+
+// palm positions of the restyle map: along the canal promenade (inner side, away from the rail) and on the median
+function palmSpots(L) {
+  const P = L.promenade, A = L.avenue, cz = L.crossStreets;
+  const near = (z, c, d) => Math.abs(z - c) < d;
+  const promenade = [], median = [];
+  let k = 0;
+  for (let z = P.zStart - 4; z > P.zEnd + 4; z -= 12) {
+    if (L.bridges.some((b) => near(z, b.z, 14)) || near(z, L.elevatedRail.z, 7) || near(z, L.expressway.z, 11)) continue;
+    // along the railing, clear of the promenade walking lane (crowd lane spans the middle of the promenade)
+    promenade.push({ x: P.xMax - 1.0 - (k % 2) * 0.3, z, rot: k * 1.37, scale: 0.92 + (k % 3) * 0.06, s: 1 });
+    k++;
+  }
+  if (A.medianHalf) {
+    for (let z = A.zStart - 10; z > A.zEnd + 10; z -= 16) {
+      if (cz.zs.some((c) => near(z, c, cz.roadHalfWidth + 9)) || near(z, L.elevatedRail.z, 4) || near(z, L.expressway.z, 4)) continue;
+      median.push({ x: 0, z, rot: z * 0.91, scale: 1.0 });
+    }
+  }
+  return { promenade, median };
+}
 
 export default {
   async init(ctx) {
@@ -43,7 +74,37 @@ export default {
     if (ex) api.expressway = ex.api;
     const river = await optional('river', () => buildRiver(ctx, tex, root));
     if (river) { api.river = river.api; this.river = river; }
-    const trees = await optional('trees', () => buildTrees(ctx, tex, root));
+    // restyle map: fan palms (canal promenade, boulevard median, plaza) instead of the cherry trees; central plaza
+    const L = ctx.layout;
+    let trees = null;
+    if (L.plaza) {
+      const spots = palmSpots(L);
+      await optional('palms', () => buildPalms(ctx, root, [...spots.promenade, ...spots.median, ...plazaPalmSpots(L)].map((s, i) => ({ variant: i * 7 % 4, ...s }))));
+      trees = { spots: spots.promenade };
+      const plaza = await optional('plaza', () => buildPlaza(ctx, tex, root));
+      if (plaza) this.updaters.push(plaza.update);
+      const holos = await optional('holos', () => buildIntersectionHolos(ctx, tex, root));
+      if (holos) this.updaters.push(holos.update);
+      await optional('streetkit', () => buildStreetKit(ctx, tex, root));
+      const boats = await optional('boats', () => buildBoats(ctx, root));
+      if (boats) this.updaters.push(boats.update);
+      const spire = await optional('spire', () => buildSpire(ctx, root));
+      if (spire) this.updaters.push(spire.update);
+      const drones = await optional('droneShow', () => buildDroneShow(ctx, root));
+      if (drones) { api.droneShow = drones; this.updaters.push(drones.update); }
+      // (flying pigeons keep out of the palm crowns: canal promenade row + plaza palms)
+      const palmsAll = [...palmSpots(L).promenade, ...plazaPalmSpots(L)];
+      const crowns = palmsAll.flatMap((p) => {
+        const y = p.y ?? 0, sc = p.scale ?? 1;
+        return [{ x: p.x, z: p.z, r: 0.5, y0: y, y1: y + 12 * sc }, { x: p.x, z: p.z, r: 3.2 * sc, y0: y + 5 * sc, y1: y + 12 * sc }]; // trunk + crown
+      });
+      const pigeons = await optional('pigeons', () => buildPigeons(ctx, root, crowns));
+      if (pigeons) { api.pigeons = pigeons.api; this.updaters.push(pigeons.update); }
+      const taco = await optional('tacoTruck', () => buildTacoTruck(ctx, root));
+      if (taco) this.updaters.push(taco.update);
+      const booth = await optional('sprayBooth', () => buildSprayBooth(ctx, root));
+      if (booth) { api.sprayBooth = booth; this.updaters.push(booth.update); }
+    } else trees = await optional('trees', () => buildTrees(ctx, tex, root));
     await optional('props', () => buildProps(ctx, tex, root, trees?.spots || []));
     const br = await optional('bridge', () => buildBridge(ctx, tex, root));
     if (br) api.bridges = br.api;

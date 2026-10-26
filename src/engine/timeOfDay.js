@@ -68,9 +68,9 @@ export const PRESETS = {
 
 // (ANIME is re-derived here instead of imported: AnimeLook.js imports this module)
 const qs = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
-const ANIME = qs.get('look') === 'anime';
+const ANIME = qs.get('look') !== 'legacy'; // anime look is the default; ?look=legacy = the original photoreal look
 const requested = qs.get('tod');
-export const TOD_NAME = !ANIME ? 'legacy' : requested === 'legacy' ? 'legacy' : PRESETS[requested] ? requested : 'night';
+export const TOD_NAME = !ANIME ? 'legacy' : requested === 'legacy' ? 'legacy' : PRESETS[requested] ? requested : 'dusk'; // dusk by default (the original is a fixed rainy night)
 export const TOD_PRESET = PRESETS[TOD_NAME] || null;
 
 // global emissive scales read by the sign, facade and sign-light code (1 = unchanged)

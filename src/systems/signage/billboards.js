@@ -7,7 +7,7 @@ import {
 import { uTime } from './materials.js';
 import { NEON } from './util.js';
 import { makeFacade } from './featured.js';
-import { artPath } from '../restyleArt.js';
+import { artPath, ART_RESTYLE } from '../restyleArt.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -124,7 +124,9 @@ export async function buildBillboards(ctx, sb, L, pool, facades) {
   const look = new THREE.Vector3(...layout.overlook.lookAt);
   const fwd = look.clone().sub(ov).setY(0).normalize();
   const right = new THREE.Vector3().crossVectors(fwd, UP).normalize();
-  const dist = 50, lateral = -14.5;
+  // restyle map: the billboard moves to the right flank so the boulevard canyon and plaza stay open on the left
+  const BB_R = !!layout.plaza;
+  const dist = 50, lateral = BB_R ? 16 : -14.5;
   const bbW = 13, bbH = 19.5;
   let center = ov.clone().addScaledVector(fwd, dist).addScaledVector(right, lateral);
   let normal = ov.clone().sub(center).setY(0).normalize();
@@ -136,11 +138,36 @@ export async function buildBillboards(ctx, sb, L, pool, facades) {
     if (f.normal.dot(toCam) < 0.75 || d < 30 || d > 90 || f.width < bbW + 1 || f.height < 24 || f.blocks) continue;
     const dir = f.center.clone().sub(ov).setY(0).normalize();
     const ang = Math.atan2(dir.clone().cross(fwd).y, dir.dot(fwd)); // + = left of forward
-    if (ang < 0.15 || ang > 0.7) continue;
-    if (!mounted || Math.abs(ang - 0.42) < mounted.s) mounted = { f, s: Math.abs(ang - 0.42) };
+    const a = BB_R ? -ang : ang;
+    if (a < 0.15 || a > 0.7) continue;
+    if (!mounted || Math.abs(a - 0.42) < mounted.s) mounted = { f, s: Math.abs(a - 0.42) };
   }
   if (mounted) { center = mounted.f.center.clone().addScaledVector(mounted.f.normal, 0.6); normal = mounted.f.normal.clone(); }
   center.y = ov.y - 2;
+  // restyle map: the key-visual billboard is the plaza's hero sign instead, on the wall closing the square's north
+  // side (facing the monument and the plaza camera); falls back to the west wall above the deck
+  if (layout.plaza) {
+    const P = layout.plaza, mx = (P.x0 + P.x1) / 2 + 4;
+    let best = null;
+    for (const f of facades) {
+      if (f.virtual) break;
+      if (f.width < bbW + 1 || f.height < 26 || f.blocks) continue;
+      const north = f.normal.z > 0.9 && Math.abs(f.center.z - P.z0) < 5 && f.center.x > P.x0 + 4 && f.center.x < P.x1 - 4;
+      const west = f.normal.x > 0.9 && Math.abs(f.center.x - P.x0) < 5 && f.center.z > P.z0 + 8 && f.center.z < P.z1 - 8;
+      if (!north && !west) continue;
+      const s = (north ? 0 : 100) + Math.abs((north ? f.center.x : f.center.z + 269) - (north ? mx + 6 : 0)) - f.width * 0.2;
+      if (!best || s < best.s) best = { f, s };
+    }
+    if (best) {
+      const f = best.f, top = f.center.y + f.height / 2;
+      center = f.center.clone().addScaledVector(f.normal, 0.6); normal = f.normal.clone();
+      center.y = Math.max(bbH / 2 + 7, Math.min(top - bbH / 2 - 5, bbH / 2 + 10));
+      if (best.f.normal.z > 0.9) center.x = Math.max(f.center.x - f.width / 2 + bbW / 2 + 1, Math.min(f.center.x + f.width / 2 - bbW / 2 - 1, mx + 6));
+    } else {
+      center = new THREE.Vector3(mx + 6, bbH / 2 + 9, P.z0 + 1); normal = new THREE.Vector3(0, 0, 1);
+    }
+    console.log(`[signage] plaza hero billboard ${best ? (best.f.normal.z > 0.9 ? 'north wall' : 'west wall') : 'free-standing'} at ${center.x.toFixed(1)},${center.y.toFixed(1)},${center.z.toFixed(1)}`);
+  }
   const bbF = makeFacade(center.clone(), normal, bbW + 2, bbH + 4);
   const bRight = bbF.right;
   {
@@ -276,7 +303,42 @@ export async function buildBillboards(ctx, sb, L, pool, facades) {
     const finR = finL.clone(); finR.scale(-1, 1, 1);
     const { mergeGeometries } = await import('three/addons/utils/BufferGeometryUtils.js');
     const strip = (g) => { const o = g.index ? g.toNonIndexed() : g; for (const k of Object.keys(o.attributes)) if (!['position', 'normal', 'uv'].includes(k)) o.deleteAttribute(k); if (!o.attributes.normal) o.computeVertexNormals(); return o; };
-    const koiGeo = mergeGeometries([strip(body), strip(tail), strip(finL), strip(finR)]);
+    let koiGeo = mergeGeometries([strip(body), strip(tail), strip(finL), strip(finR)]);
+    // restyle: holographic manta rays instead of koi (harbour-canal ward; the koi are the original's Japanese motif) -
+    // a finely subdivided flat sheet whose outline is cut in the shader, wings flapping with distance from the spine
+    const MANTA = ART_RESTYLE;
+    if (MANTA) {
+      const sheet = new THREE.PlaneGeometry(11, 7.2, 44, 28).rotateX(-Math.PI / 2); // head toward +Z
+      const tailG = new THREE.BoxGeometry(0.16, 0.06, 5).translate(0, 0, -5.6);
+      koiGeo = mergeGeometries([strip(sheet), strip(tailG)]);
+    }
+    const mkMantaMat = (cA, cB, phase) => {
+      const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+      const t = uTime.add(phase);
+      const p = attribute('position', 'vec3'); // raw sheet coordinates: the outline mask must not follow the flap / tail sway
+      const ax = abs(p.x);
+      // wing beat: tips lag the root, slow and heavy
+      const flap = sin(t.mul(1.7).sub(ax.mul(0.35))).mul(ax.mul(ax).mul(0.05));
+      const tailWave = sin(p.z.mul(0.8).sub(t.mul(2.4))).mul(0.25).mul(smoothstep(-3.2, -8.0, p.z));
+      m.positionNode = vec3(p.x.add(tailWave), p.y.add(flap), p.z);
+      // outline: half-width as a function of z (rear -3.4 .. head 3.6), small cephalic notch at the head
+      const tz = p.z.add(3.4).div(7.0).clamp(0, 1);
+      const halfW = sin(tz.pow(0.85).mul(Math.PI)).pow(1.15).mul(5.4).add(smoothstep(0.92, 1.0, tz).mul(0.6));
+      const inBody = smoothstep(halfW.add(0.05), halfW.sub(0.05), ax).mul(step(-3.4, p.z));
+      const isTail = step(p.z, -3.3).mul(step(ax, 0.2));
+      const edge = smoothstep(halfW.sub(0.6), halfW, ax).mul(inBody);
+      const grid = max(step(0.93, fract(p.x.mul(0.9))), step(0.93, fract(p.z.mul(0.9)))).mul(0.5);
+      const spine = smoothstep(0.5, 0.0, ax).mul(0.6);
+      const col = mix(vec3(...cA), vec3(...cB), smoothstep(0.0, 5.0, ax));
+      const scan = sin(p.z.mul(14.0).sub(t.mul(6.0))).mul(0.5).add(0.5).pow(3.0).mul(0.6).add(0.45);
+      const flick = step(0.05, hash(floor(t.mul(11.0)).add(23))).mul(0.3).add(0.7);
+      const shade = edge.mul(2.4).add(grid).add(spine).add(0.22);
+      const mask = max(inBody, isTail);
+      m.colorNode = vec4(col.mul(shade).mul(scan).mul(flick).mul(mask).mul(1.3), 1);
+      m.opacityNode = mask;
+      m.fog = false; // (fog would fill the whole sheet outside the outline)
+      return m;
+    };
     const mkKoiMat = (cA, cB, phase) => {
       const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
       const t = uTime.add(phase);
@@ -298,8 +360,8 @@ export async function buildBillboards(ctx, sb, L, pool, facades) {
       { c: new THREE.Vector3(1, 23, cz[0] - 30), r: 12, h: 3, sp: -0.16, cA: [0.2, 0.8, 1.0], cB: [1.0, 0.3, 0.8], ph: 3 },
     ];
     for (const s of specs) {
-      const mesh = new THREE.Mesh(koiGeo, mkKoiMat(s.cA, s.cB, s.ph));
-      mesh.renderOrder = 12; mesh.frustumCulled = false; mesh.name = 'holo_koi';
+      const mesh = new THREE.Mesh(koiGeo, MANTA ? mkMantaMat(s.cA, s.cB, s.ph) : mkKoiMat(s.cA, s.cB, s.ph));
+      mesh.renderOrder = 12; mesh.frustumCulled = false; mesh.name = MANTA ? 'holo_manta' : 'holo_koi';
       scene.add(mesh); kois.push({ mesh, ...s });
       pool.add({ pos: s.c.clone(), color: s.cA, intensity: 25, distance: 18, seed: 1, ftype: 0, importance: 1.5 });
     }

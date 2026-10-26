@@ -252,6 +252,8 @@ export class Engine {
         this.ctx.physics.world.step();
         acc -= step;
       }
+      // photo mode clock: everything that animates from absolute time subtracts the time spent frozen
+      if (this.ctx.photoFreeze) this.ctx.photoHold = (this.ctx.photoHold || 0) + dt;
       for (const s of this.systems) if (!s._failed && s.update) {
         try { s.update(dt, this.time, this.ctx); } catch (e) { console.error(`[engine] ${s.name}.update`, e); s._failed = true; }
       }
@@ -259,6 +261,9 @@ export class Engine {
       if (this.shot) this.applyShotView(this.shot);
       this.ctx.input.endFrame();
       this.postfx.render(dt);
+      // one-shot hook right after the frame is rendered (photo mode reads the canvas back in the same task)
+      const ar = this.ctx.afterRender;
+      if (ar) { this.ctx.afterRender = null; try { ar(); } catch (e) { console.error('[engine] afterRender', e); } }
       this.frame++;
       if (this.frame === 5 && this._pipelinesAfterPrecompile) console.log(`[engine] pipelines built after precompile: ${this.renderer._pipelines.caches.size - this._pipelinesAfterPrecompile}`);
       if (this.shot && this.frame === this.shotFrames) window.__shotReady = true;

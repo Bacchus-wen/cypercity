@@ -184,6 +184,7 @@ export default {
   },
 
   update(dt, t, ctx) {
+    if (ctx.photoFreeze) return; // photo mode: everyone holds still mid-stride
     if (this.test) { for (const ch of this.test) ch.mixer.update(dt); return; }
     if (this.testVat) {
       for (const a of this.testVat) a.y = ctx.api.ground?.heightAt?.(a.x, a.z) ?? 0;

@@ -1,6 +1,8 @@
 // Utility poles + sagging power/telecom cables (ref panel 1 & 4): along the avenue, cross streets, the alley,
 // service drops to facades, and building-to-building spans.
 import { mulberry32 } from './rng.js';
+import { sprayEnabled } from '../player/spray.js';
+import { tacoEnabled, tacoSpot } from '../player/taco.js';
 import { DETAIL_ATTRS } from './architecture.js';
 import { MASS } from './plan.js';
 
@@ -99,7 +101,7 @@ export function buildCables(ctx, lots, B, out) {
   // ---------- service drops to facades ----------
   function drops(tops, facadeAt) {
     for (const p of tops) {
-      const n = rng.int(2, 5);
+      const n = BLVD ? rng.int(1, 2) : rng.int(2, 5); // (restyle map: far fewer service drops)
       for (let k = 0; k < n; k++) {
         const tgt = facadeAt(p, rng.range(-9, 9), rng.range(4.5, 9.5));
         if (!tgt) continue;
@@ -117,8 +119,11 @@ export function buildCables(ctx, lots, B, out) {
   const cz = L.crossStreets.zs;
   const avSkip = (z) => cz.some((c) => Math.abs(z - c) < 10) || Math.abs(z - L.elevatedRail.z) < 8 || Math.abs(z - L.expressway.z) < 11 || Math.abs(z - L.alley.z) < 3.5;
   const front = L.blocks.frontageOffset;
-  const east = poleLine(X, av.zStart - 4, av.zEnd + 4, 'z', { skip: avSkip, step: 22 });
-  const west = poleLine(-X, av.zStart - 12, av.zEnd + 4, 'z', { skip: avSkip, step: 22 });
+  // (restyle map: the wide boulevard has no utility poles or wires across it - a Japanese-street signature; cross
+  //  streets and the alley keep theirs)
+  const BLVD = !!L.plaza;
+  const east = BLVD ? [] : poleLine(X, av.zStart - 4, av.zEnd + 4, 'z', { skip: avSkip, step: 22 });
+  const west = BLVD ? [] : poleLine(-X, av.zStart - 12, av.zEnd + 4, 'z', { skip: avSkip, step: 22 });
   drops(east, (p, dz, y) => [front - 0.02, y, p.z + dz]);
   drops(west, (p, dz, y) => [-front + 0.02, y, p.z + dz]);
   // spans across the avenue: pole to pole and facade to facade
@@ -129,7 +134,7 @@ export function buildCables(ctx, lots, B, out) {
     if (rng.chance(0.65)) wire(e.arms[1][0], w.arms[1][2], 0.9, 0.02);
     if (rng.chance(0.5)) wire(e.tel, w.tel, 1.2, 0.035);
   }
-  for (let z = av.zStart - 6; z > av.zEnd; z -= rng.range(10, 22)) {
+  for (let z = av.zStart - 6; z > av.zEnd && !BLVD; z -= rng.range(10, 22)) {
     if (avSkip(z)) continue;
     const y1 = rng.range(7, 13), y2 = y1 + rng.range(-2, 2);
     const zOff = rng.range(-6, 6), sag = rng.range(0.8, 1.8);
@@ -144,9 +149,14 @@ export function buildCables(ctx, lots, B, out) {
   for (const c of cz) {
     const zN = c - cs.roadHalfWidth - 0.6, zS = c + cs.roadHalfWidth + 0.6;
     for (const sgn of [1, -1]) {
-      const xa = sgn * (front + 3), xb = sgn * 125;
-      const t1 = poleLine(zN, xa, xb, 'x', { step: 26 });
-      const t2 = poleLine(zS, xa, xb, 'x', { step: 26 });
+      const xa = sgn * (front + 3), xb = sgn > 0 ? Math.min(125, cs.xEnd - 4) : -125; // (stop at the canal promenade)
+      const t1 = BLVD ? [] : poleLine(zN, xa, xb, 'x', { step: 26 }); // (restyle map: one pole line per cross street)
+      const sp = sprayEnabled(L) && L.spray; // (restyle: keep the respray booth's canopy clear of poles)
+      const tk = tacoEnabled(L) && tacoSpot(L); // (and of the taco truck + its queue)
+      const skipS = sp && Math.abs(zS - (sp.kerbZ + 0.6)) < 0.5 ? (t) => Math.abs(t - sp.x) < sp.len / 2 + 1.5 : null;
+      const skipT = tk && Math.abs(zS - (tk.kerbZ + 0.6)) < 0.5 ? (t) => t > tk.x - tk.len / 2 - 1.5 && t < tk.x + tk.len / 2 + 3.5 : null;
+      const skip = skipS || skipT ? (t) => !!(skipS?.(t) || skipT?.(t)) : undefined;
+      const t2 = poleLine(zS, xa, xb, 'x', { step: BLVD ? 34 : 26, skip });
       drops(t1, (p, dx, y) => [p.x + dx, y, c - cs.roadHalfWidth - cs.sidewalkWidth + 0.02]);
       drops(t2, (p, dx, y) => [p.x + dx, y, c + cs.roadHalfWidth + cs.sidewalkWidth - 0.02]);
       for (let i = 0; i < Math.min(t1.length, t2.length); i++) if (rng.chance(0.5)) wire(t1[i].tel, t2[i].tel, 0.9, 0.03);
@@ -157,14 +167,16 @@ export function buildCables(ctx, lots, B, out) {
   const A = L.alley, S = A.stairs;
   const zN = A.z - A.width / 2 + 0.02, zS = A.z + A.width / 2 - 0.02;
   const gY = (x) => (x > S.xStart ? 0 : x < S.xEnd ? S.rise : (S.xStart - x) / (S.xStart - S.xEnd) * S.rise);
-  for (let x = A.xStart - 1; x > A.xEnd + 1; x -= rng.range(0.6, 1.8)) {
+  // (restyle map: the passage is covered; no criss-crossing tangle, only a few conduit runs along the walls)
+  const S2 = !!L.plaza;
+  for (let x = A.xStart - 1; !S2 && x > A.xEnd + 1; x -= rng.range(0.6, 1.8)) {
     const y = gY(x) + rng.range(3.4, 10);
     const x2 = x + rng.range(-3, 3);
     wire([x, y, zN], [x2, gY(x2) + rng.range(3.4, 10), zS], rng.range(0.15, 0.7), rng.chance(0.3) ? 0.03 : 0.016, 6);
     det(x, zN).box(x, y, zN + 0.04, 0.08, 0.08, 0.08, ARM);
   }
   // long runs along the alley walls & bundles
-  for (let k = 0; k < 14; k++) {
+  for (let k = 0; k < (S2 ? 4 : 14); k++) {
     const z = rng.chance(0.5) ? zN + rng.range(0.05, 0.6) : zS - rng.range(0.05, 0.6);
     let x = A.xStart - rng.range(0, 6);
     while (x > A.xEnd + 3) {

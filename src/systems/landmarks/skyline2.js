@@ -300,11 +300,17 @@ export function buildSkyline2(ctx, tex, root) {
   };
   const rail = ctx.layout.elevatedRail, exw = ctx.layout.expressway;
   const blocked = (x, z, r) => {
-    if (x > -215 - r && x < 148 + r && z > -440 - r && z < 75 + r) return true;
+    // district rect from the layout (the original map gives the old literal -215..148 x -440..75)
+    const L2 = ctx.layout;
+    if (x > L2.crossStreets.xStart - 15 - r && x < R.xCenter - R.halfWidth + 8 + r && z > L2.avenue.zEnd - 20 - r && z < L2.avenue.zStart + 15 + r) return true;
     if (x > R.xCenter - R.halfWidth - 8 - r && x < R.xCenter + R.halfWidth + 10 + r) return true;
     if (Math.abs(z - rail.z) < 10 + r) return true;
     if (Math.abs(z - exw.z) < 14 + r) return true;
     if (Math.abs(z - ctx.layout.bridges[0].z) < 14 + r && x < 270) return true;
+    // restyle map: room around the Solano Spire and a sightline corridor up the boulevard axis to it
+    const sp = L2.spire;
+    // (the corridor continues behind the spire so its silhouette stands against open sky)
+    if (sp && (Math.hypot(x - sp.x, z - sp.z) < sp.r + 50 + r || (Math.abs(x - sp.x) < 45 + r && z < L2.avenue.zEnd && z > sp.z - 600))) return true;
     for (const t of towers) { const dx = t.x - x, dz = t.z - z; if (dx * dx + dz * dz < (t.r + r + 6) ** 2) return true; }
     return false;
   };

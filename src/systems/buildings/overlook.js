@@ -9,7 +9,8 @@ export function buildOverlook(ctx, lots, B, out) {
   const y = lot.overlook.deckY;
   const x0 = lot.x0 + 0.5, x1 = lot.x1 - 0.5;
   const zFront = lot.z0;            // building north face
-  const zEdge = ov[2] - 1.35;        // deck edge (railing) in front of the camera
+  // deck edge (railing) in front of the camera (restyle skydeck: right at the camera so the railing stays out of frame)
+  const zEdge = ov[2] - (L.overlook.tower ? 0.55 : 1.35);
   const fac = B.get(ov[0], ov[2], 'facade', FACADE_ATTRS);
   const det = B.get(ov[0], ov[2], 'detail', DETAIL_ATTRS);
   const slab = trimAttr(1, 3, 0.45, 0.31);

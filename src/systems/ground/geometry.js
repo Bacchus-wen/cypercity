@@ -169,16 +169,17 @@ export function buildGroundGeometry() {
   const baseRects = rectsMinus(G.world, [alleyLower, prom, river]);
   const base = mergeGeometries(baseRects.map((r) => quad(r, 0)));
 
-  const swGeoms = [], curbGeoms = [], swColliders = [];
+  const swGeoms = [], curbGeoms = [], swColliders = [], plazaGeoms = [];
   for (const poly of sidewalkPolys()) {
-    let pts = roundPoly(poly.pts, poly.round, G.cornerR);
+    let pts = roundPoly(poly.pts, poly.round, poly.r ?? G.cornerR);
     if (signedArea(pts) < 0) pts = pts.reverse();
     curbGeoms.push(curbRibbon(pts, G.curbW, G.curbH));
     const inner = insetPoly(pts, G.curbW);
-    swGeoms.push(shapeGeometry(inner, G.curbH));
+    (poly.plaza ? plazaGeoms : swGeoms).push(shapeGeometry(inner, G.curbH));
     swColliders.push(poly.pts);
   }
   const sidewalk = mergeGeometries(swGeoms);
+  const plaza = plazaGeoms.length ? mergeGeometries(plazaGeoms) : null;
   const curb = mergeGeometries(curbGeoms);
 
   const alley = mergeGeometries([quad(alleyLower, 0), quad(alleyUpper, al.stairs.rise)]);
@@ -192,5 +193,5 @@ export function buildGroundGeometry() {
   wE.rotateY(-Math.PI / 2); wE.translate(G.river.x1, -wallH / 2, (zA + zB) / 2);
   const wall = mergeGeometries([wW, wE]);
 
-  return { base, sidewalk, curb, alley, promenade, wall, baseRects, alleyLower, alleyUpper, prom, swColliders };
+  return { base, sidewalk, plaza, curb, alley, promenade, wall, baseRects, alleyLower, alleyUpper, prom, swColliders };
 }

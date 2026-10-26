@@ -13,7 +13,8 @@ import { vnoise } from './materials.js';
 import { propGltf } from '../propModels.js';
 
 // exterior ducts (megamass.js buildDucts) record their wall positions: AC units keep 1.1 m clear of them
-const nearDuct = (lot, p) => !!lot.ducts && lot.ducts.some((d) => Math.hypot(d.x - p[0], d.z - p[2]) < 1.1);
+const nearDuct = (lot, p) => (!!lot.ducts && lot.ducts.some((d) => Math.hypot(d.x - p[0], d.z - p[2]) < 1.1))
+  || (!!lot.leds && lot.leds.some((d) => Math.hypot(d.x - p[0], d.z - p[2]) < 1.0 && p[1] > d.y0 - 1 && p[1] < d.y1 + 1)); // (restyle LED fins)
 const D = (col, em = 0, rough = 0.6, metal = 0, grime = 0.5) => ({ aCol: [col[0], col[1], col[2], em], aPbr: [rough, metal, 0, grime] });
 const PIPE_GREY = [0.55, 0.55, 0.52], PIPE_DARK = [0.12, 0.12, 0.12], STEEL = [0.3, 0.3, 0.3], RUST = [0.32, 0.18, 0.1];
 const LAUNDRY = [[0.85, 0.85, 0.82], [0.2, 0.3, 0.55], [0.7, 0.2, 0.2], [0.9, 0.75, 0.4], [0.3, 0.5, 0.35], [0.15, 0.15, 0.15], [0.85, 0.55, 0.65]];
@@ -281,12 +282,14 @@ export async function buildProps(ctx, lots, B, out, { wetness }) {
     if (rx1 - rx0 < 1.5 || rz1 - rz0 < 1.5) continue;
     const ry = top.y1;
     const rp = () => [r.range(rx0, rx1), r.range(rz0, rz1)];
+    // roof occupancy (restyle rooftops2.js keeps its water tanks / helipads clear of these): [x0, z0, x1, z1]
+    const occ = (lot.roofRects ||= []), mark = (x, z, hx, hz) => occ.push([x - hx, z - hz, x + hx, z + hz]);
     const nAC = near ? r.int(1, 5) : r.int(0, 2);
-    for (let i = 0; i < nAC; i++) { const [x, z] = rp(); place(acM, x, ry, z, r.int(0, 3) * Math.PI / 2); }
+    for (let i = 0; i < nAC; i++) { const [x, z] = rp(); place(acM, x, ry, z, r.int(0, 3) * Math.PI / 2); mark(x, z, 0.7, 0.7); }
     if (r.chance(near ? 0.4 : 0.2)) {
       const [x, z] = rp();
-      if (r.chance(0.5)) place(tankM, x, ry, z, r() * 6.28, r.range(0.8, 1.15));
-      else if (rx1 - rx0 > 4 && rz1 - rz0 > 3) place(ptankM, (rx0 + rx1) / 2, ry, (rz0 + rz1) / 2, r.int(0, 3) * Math.PI / 2, 1);
+      if (r.chance(0.5)) { place(tankM, x, ry, z, r() * 6.28, r.range(0.8, 1.15)); mark(x, z, 1.0, 1.0); }
+      else if (rx1 - rx0 > 4 && rz1 - rz0 > 3) { place(ptankM, (rx0 + rx1) / 2, ry, (rz0 + rz1) / 2, r.int(0, 3) * Math.PI / 2, 1); mark((rx0 + rx1) / 2, (rz0 + rz1) / 2, 2.2, 1.6); }
     }
     if (r.chance(near ? 0.45 : 0.25) && rx1 - rx0 > 3.5 && rz1 - rz0 > 3.5) {
       // stair / elevator house
@@ -294,11 +297,13 @@ export async function buildProps(ctx, lots, B, out, { wetness }) {
       const x = r.chance(0.5) ? rx0 + w / 2 : rx1 - w / 2, z = r.chance(0.5) ? rz0 + d / 2 : rz1 - d / 2;
       fac.box(x, ry + h / 2, z, w, h, d, trim);
       fac.box(x, ry + h + 0.05, z, w + 0.2, 0.1, d + 0.2, trim);
+      mark(x, z, w / 2 + 0.1, d / 2 + 0.1);
     }
     if (r.chance(near ? 0.5 : 0.25)) {
       // antenna mast with yagi crossbars
       const [x, z] = rp();
       const h = r.range(2.5, 6);
+      mark(x, z, 0.9, 0.9);
       det.cyl([x, ry, z], [x, ry + h, z], 0.035, D(STEEL, 0, 0.4, 0.8), 5);
       for (let k = 0; k < r.int(1, 3); k++) {
         const yy = ry + h - 0.3 - k * 0.7, a = r() * 3.14, l = r.range(0.8, 1.6);
@@ -309,6 +314,7 @@ export async function buildProps(ctx, lots, B, out, { wetness }) {
     if (near && r.chance(0.3)) {
       // satellite dish
       const [x, z] = rp(); const a = r() * 6.28;
+      mark(x, z, 0.6, 0.6);
       const m = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(0.9, a, 0, 'YXZ')).setPosition(x, ry + 0.9, z);
       det.geometry(dishGeo(), m, D([0.8, 0.8, 0.78], 0, 0.5, 0.2, 0.6));
       det.cyl([x, ry, z], [x, ry + 0.85, z], 0.03, D(STEEL, 0, 0.4, 0.8));
@@ -338,6 +344,11 @@ export async function buildProps(ctx, lots, B, out, { wetness }) {
         det.beam(wallPt(fr, s, ry, -3.0), wallPt(fr, s, y0 + bh * 0.6, -0.6), 0.08, steel);
       }
       for (let k = 0; k <= 3; k++) det.beam(wallPt(fr, sMid - bw / 2, y0 + bh * k / 3, -0.6), wallPt(fr, sMid + bw / 2, y0 + bh * k / 3, -0.6), 0.06, steel);
+      { // roof occupancy of the frame and its back braces (up to 3 m in from the wall)
+        const q = [wallPt(fr, sMid - bw / 2, ry, -3.3), wallPt(fr, sMid + bw / 2, ry, -3.3), wallPt(fr, sMid - bw / 2, ry, 0), wallPt(fr, sMid + bw / 2, ry, 0)];
+        const xs = q.map((p) => p[0]), zs = q.map((p) => p[2]);
+        occ.push([Math.min(...xs) - 0.2, Math.min(...zs) - 0.2, Math.max(...xs) + 0.2, Math.max(...zs) + 0.2]);
+      }
       // panel (poster art, lit by small lamps)
       const cell = r.int(0, 15);
       const sub = [(cell % 4) * 0.25, Math.floor(cell / 4) * 0.25, 0.25, 0.25];

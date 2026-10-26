@@ -2,7 +2,8 @@
 import { generate, ORDER } from './synth.js';
 
 self.onmessage = (e) => {
-  const order = e.data?.order || ORDER;
+  const skip = new Set(e.data?.skip || []);
+  const order = (e.data?.order || ORDER).filter((n) => !skip.has(n));
   for (const name of order) {
     try {
       const r = generate(name);

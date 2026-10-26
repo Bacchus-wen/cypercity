@@ -10,6 +10,7 @@ import { surface, metal, emissiveMat, U } from './materials.js';
 // River: reflective rain-rippled water (planar reflection), stone embankments, promenade railing + lanterns.
 export function buildRiver(ctx, tex, root) {
   const R = ctx.layout.river;
+  const CANAL = !!R.canal; // restyle map: modern lamp masts instead of the stone lantern posts
   const P = ctx.layout.promenade;
   const W = R.waterLevel;
   const xw = R.xCenter - R.halfWidth, xe = R.xCenter + R.halfWidth; // 140, 210
@@ -130,7 +131,22 @@ export function buildRiver(ctx, tex, root) {
     for (let z = bank.z0; z > bank.z1; z -= 2.4, idx++) {
       if (gaps(z) || gaps(z - 2.4)) continue;
       const lamp = idx % bank.lampEvery === 0;
-      if (lamp) {
+      if (lamp && CANAL) {
+        // restyle canal: slim steel lamp mast with an LED bar head on an arm over the walkway, cyan accent strip
+        const s = bank.s; // west bank (s<0): walkway toward -x
+        b.box('darkMetal', 0.32, 0.12, 0.32, bank.x, 0.06, z);
+        b.box('railMetal', 0.13, 4.5, 0.13, bank.x, 2.25, z);
+        b.box('led', 0.025, 1.5, 0.05, bank.x + s * 0.075, 1.85, z);
+        b.box('railMetal', 1.5, 0.09, 0.11, bank.x + s * 0.7, 4.45, z);
+        b.box('railMetal', 0.95, 0.07, 0.26, bank.x + s * 1.15, 4.37, z);
+        b.box('led', 0.85, 0.025, 0.18, bank.x + s * 1.15, 4.325, z);
+        if (z < 45 && z > -560 && (bank.s < 0 || idx % (bank.lampEvery * 2) === 0)) {
+          const l = new THREE.PointLight(0xd6ecff, bank.s < 0 ? 24 : 28, 15, 1.6);
+          l.position.set(bank.x + s * 1.15, 4.1, z);
+          root.add(l); lights.push(l);
+        }
+        cuboid(ctx, bank.x, 2.25, z, 0.1, 2.25, 0.1);
+      } else if (lamp) {
         // stone lantern post (tourou-like bollard): plinth + shaft + lit head + roof cap
         b.box('post', 0.46, 0.18, 0.46, bank.x, 0.09, z);
         b.box('post', 0.34, 1.0, 0.34, bank.x, 0.68, z);
@@ -179,6 +195,7 @@ export function buildRiver(ctx, tex, root) {
     stone: wallMat, coping: copingMat,
     post: surface({ map: tex.concrete, nmap: tex.concrete_n, rmap: tex.concrete_r }, { uvScale: 1 / 2.5, tint: [0.62, 0.6, 0.57], normalScale: 1.4, macro: 0.5, streaks: 0.5 }),
     lantern: lanternMat,
+    led: emissiveMat([0.78, 0.94, 1.0], 6),
     railMetal: metal({ color: [0.1, 0.1, 0.11], rough: 0.3, metal: 0.9 }),
     darkMetal: metal({ color: [0.12, 0.1, 0.09], rough: 0.5 }),
     hole: emissiveMat([0, 0, 0], 0),

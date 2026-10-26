@@ -50,15 +50,21 @@ export function buildPlan(L) {
     // overlook view cone
     const dx = cx - ov[0], dz = cz - ov[2];
     const d = Math.hypot(dx, dz);
-    if (d > 8 && d < 260) {
+    if (d > 8 && d < 260 && !L.overlook.tower) { // (restyle map: the boulevard itself is the view corridor)
       const c = (dx * ovDir[0] + dz * ovDir[1]) / d;
       const side = dx * -ovDir[1] + dz * ovDir[0]; // >0 => left of view? (perp)
-      if (c > Math.cos(0.62) && !(side < -0 && c < Math.cos(0.42))) cap = Math.min(cap, 12 + d * 0.035);
+      // the flank that carries the overlook billboard stays tall (left on the original map, right on the restyle map)
+      const free = L.plaza ? side > 0 : side < -0;
+      if (c > Math.cos(0.62) && !(free && c < Math.cos(0.42))) cap = Math.min(cap, 12 + d * 0.035);
     }
     // south of the avenue start: keep low so the aerial view (from z=+120) sees over it into the district
-    if (cz > 45) cap = Math.min(cap, 14 + Math.max(0, cz - 45) * 0.12);
+    // (relative to the avenue start / first cross street: the same values as before on the original map)
+    const zSouth = L.avenue.zStart - 15, zFirst = L.crossStreets.zs[0] - 10;
+    if (cz > zSouth) cap = Math.min(cap, 14 + Math.max(0, cz - zSouth) * 0.12);
     // aerial view corridor: keep the south-west avenue blocks moderate so the avenue canyon reads from above
-    if (cz > -70 && cz < 45 && cx < -6 && cx > -140) cap = Math.min(cap, 30);
+    // (restyle map: both sides, a little higher, so the skydeck at 48 m looks over symmetric flanks into the canyon)
+    if (L.overlook.tower) { if (cz > zFirst && cz < zSouth && Math.abs(cx) < 140) cap = Math.min(cap, 34); }
+    else if (cz > zFirst && cz < zSouth && cx < -6 && cx > -140) cap = Math.min(cap, 30);
     // under elevated rail / expressway: keep below decks (they are owned by landmarks)
     const nearZ = (zc, half) => z0 < zc + half && z1 > zc - half;
     if (nearZ(L.elevatedRail.z, railHalf + 2)) cap = Math.min(cap, L.elevatedRail.height - 3);
@@ -87,7 +93,7 @@ export function buildPlan(L) {
     let floors = opts.floors;
     const groundH = opts.groundH ?? rng.range(3.9, 4.6);
     let h = groundH + (floors - 1) * floorH;
-    const cap = heightCap(r.x0, r.x1, r.z0, r.z1);
+    const cap = opts.noCap ? 999 : heightCap(r.x0, r.x1, r.z0, r.z1); // (restyle skydeck tower is exempt)
     const capF = Math.max(1, Math.floor((cap - groundH) / floorH) + 1);
     if (h > cap) {
       floors = capF;
@@ -219,7 +225,8 @@ export function buildPlan(L) {
   const kindDistrict = (k) => (k === 'alleyS' || k === 'alleyN') ? 'alley' : 'cross';
 
   // ---------------- Avenue blocks (both sides) ----------------
-  const backLaneX = 38, backLaneW = 5;
+  const backLaneX = front + 28, backLaneW = 5; // (38 on the original map)
+  const MAPB = !!L.plaza; // restyle map: back-region lanes derived from its own layout (original lists kept below)
   for (const sideSign of [1, -1]) {
     const extra = sideSign < 0 ? [[alley.z - alleyHalf, alley.z + alleyHalf, 'alley']] : [];
     for (const seg of segments(av.zStart, av.zEnd, extra)) {
@@ -305,12 +312,20 @@ export function buildPlan(L) {
   const backZCuts = [
     ...crossZ.map((z) => zGap(z, crossHalf)),
     zGap(L.elevatedRail.z, railHalf), zGap(L.expressway.z, expHalf),
-    zGap(L.bridges[0].z, 6), zGap(-5, 3), zGap(-110, 3), zGap(-215, 3), zGap(-355, 3), zGap(-395, 3), zGap(25, 3),
+    zGap(L.bridges[0].z, 6),
+    ...(MAPB
+      ? (() => { // service lanes halfway between the avenue's cuts (cross streets, rail, expressway, ends)
+        const cuts = [av.zStart, ...crossZ, L.elevatedRail.z, L.expressway.z, av.zEnd].sort((a, b) => b - a);
+        const out = [];
+        for (let i = 0; i < cuts.length - 1; i++) if (cuts[i] - cuts[i + 1] > 40) out.push(zGap((cuts[i] + cuts[i + 1]) / 2, 3));
+        return out;
+      })()
+      : [zGap(-5, 3), zGap(-110, 3), zGap(-215, 3), zGap(-355, 3), zGap(-395, 3), zGap(25, 3)]),
   ];
   // East back region: x from back lane to the riverbank
   {
     const R = { x0: backLaneX + backLaneW, x1: riverBankW, z0: av.zEnd, z1: av.zStart };
-    fillRegion(R, [84], backZCuts.filter((g) => g[0] > R.z0 && g[1] < R.z1), 6, (r) => {
+    fillRegion(R, MAPB ? (R.x1 - R.x0 > 50 ? [Math.round((R.x0 + R.x1) / 2)] : []) : [84], backZCuts.filter((g) => g[0] > R.z0 && g[1] < R.z1), 6, (r) => {
       // overlook building occupies its own lot
       const c = backCfg(r, 160, (q) => Math.abs((q.x0 + q.x1) / 2));
       if (Math.abs(r.x1 - riverBankW) < EPS) c.streets.unshift({ side: 'px', district: 'river', shop: false, depth: [9, 14], width: [7, 14], floors: [4, 12], detail: 'mid' });
@@ -319,8 +334,8 @@ export function buildPlan(L) {
   }
   // West back region (excluding alley district)
   {
-    const R = { x0: -200, x1: -backLaneX - backLaneW, z0: av.zEnd, z1: av.zStart };
-    fillRegion(R, [-96, -150], backZCuts.filter((g) => g[0] > R.z0 && g[1] < R.z1), 6, (r) => {
+    const R = { x0: MAPB ? L.crossStreets.xStart : -200, x1: -backLaneX - backLaneW, z0: av.zEnd, z1: av.zStart };
+    fillRegion(R, MAPB ? [-100, -155] : [-96, -150], backZCuts.filter((g) => g[0] > R.z0 && g[1] < R.z1), 6, (r) => {
       // skip the alley district rect
       const cz = (r.z0 + r.z1) / 2, cx = (r.x0 + r.x1) / 2;
       if (cz > L.elevatedRail.z && cz < crossZ[0] && cx > alleyEndX - 1) return null;
@@ -329,10 +344,13 @@ export function buildPlan(L) {
   }
   // South fill beyond the avenue start (closing the view) and north beyond the avenue end
   {
-    const Rs = { x0: -200, x1: riverBankW, z0: av.zStart + 6, z1: 170 };
-    fillRegion(Rs, [-96, -40, 40, 84], [zGap(110, 3)], 6, (r) => backCfg(r, 0, () => 999));
-    const Rn = { x0: -200, x1: riverBankW, z0: -560, z1: av.zEnd - 6 };
-    fillRegion(Rn, [-96, -40, 0, 40, 84], [zGap(-470, 3)], 6, (r) => backCfg(r, 0, () => 999));
+    const W0 = MAPB ? L.crossStreets.xStart : -200;
+    const lanesS = MAPB ? [-100, -(backLaneX + backLaneW), backLaneX + backLaneW, 75] : [-96, -40, 40, 84];
+    const lanesN = MAPB ? [-100, -(backLaneX + backLaneW), 0, backLaneX + backLaneW, 75] : [-96, -40, 0, 40, 84];
+    const Rs = { x0: W0, x1: riverBankW, z0: av.zStart + 6, z1: MAPB ? av.zStart + 110 : 170 };
+    fillRegion(Rs, lanesS, [zGap(MAPB ? av.zStart + 50 : 110, 3)], 6, (r) => backCfg(r, 0, () => 999));
+    const Rn = { x0: W0, x1: riverBankW, z0: MAPB ? av.zEnd - 140 : -560, z1: av.zEnd - 6 };
+    fillRegion(Rn, lanesN, [zGap(MAPB ? av.zEnd - 60 : -470, 3)], 6, (r) => backCfg(r, 0, () => 999));
   }
   // East bank of the river (far, low detail) facing the river
   {
@@ -345,15 +363,27 @@ export function buildPlan(L) {
     });
   }
 
+  // ---------------- Central plaza (restyle map): no lots inside its rect ----------------
+  if (L.plaza) {
+    const P = L.plaza;
+    for (let i = lots.length - 1; i >= 0; i--) {
+      const l = lots[i];
+      if (l.x0 < P.x1 && l.x1 > P.x0 - 0.5 && l.z0 < P.z1 && l.z1 > P.z0) lots.splice(i, 1);
+    }
+  }
+
   // ---------------- Overlook building ----------------
   // remove lots overlapping the overlook footprint, then add the special building
-  const ovFoot = { x0: ov[0] - 8, x1: ov[0] + 9, z0: ov[2] + crossHalf + 0.0, z1: ov[2] + crossHalf + 22 };
+  // (restyle map: an 18 m wide tower closing the boulevard's south end, deck cantilevered north over the road end)
+  const ovFoot = L.overlook.tower ? { x0: ov[0] - 9.5, x1: ov[0] + 8.5, z0: av.zStart + 7, z1: av.zStart + 29 }
+    : { x0: ov[0] - 8, x1: ov[0] + 9, z0: ov[2] + crossHalf + 0.0, z1: ov[2] + crossHalf + 22 };
   for (let i = lots.length - 1; i >= 0; i--) {
     const l = lots[i];
     if (l.x0 < ovFoot.x1 && l.x1 > ovFoot.x0 && l.z0 < ovFoot.z1 && l.z1 > ovFoot.z0) lots.splice(i, 1);
   }
   const deckY = ov[1] - 1.6;
-  const ovLot = addLot(ovFoot, { floors: 7, floorH: (deckY - 4.4) / 6, groundH: 4.4, style: 'tile', detail: 'hi' });
+  const ovFl = L.overlook.tower ? Math.round((deckY - 4.4) / 3.8) + 1 : 7;
+  const ovLot = addLot(ovFoot, { floors: ovFl, floorH: (deckY - 4.4) / (ovFl - 1), groundH: 4.4, style: 'tile', detail: 'hi', noCap: !!L.overlook.tower });
   ovLot.fronts.push({ side: 'nz', district: 'cross', shop: true });
   ovLot.overlook = { deckY };
   ovLot.setback = null;

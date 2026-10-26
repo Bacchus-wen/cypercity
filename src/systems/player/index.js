@@ -5,6 +5,9 @@ import { createAvatar } from './avatar.js';
 import { createZones } from './zones.js';
 import { Gigs } from './gigs.js';
 import { Settings } from './settings.js';
+import { TOD_NAME } from '../../engine/timeOfDay.js';
+import { sprayEnabled } from './spray.js';
+import { tacoEnabled } from './taco.js';
 
 const damp = (a, b, k, dt) => a + (b - a) * (1 - Math.exp(-k * dt));
 const ease = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
@@ -48,8 +51,12 @@ export default {
     this.ctrl = new PlayerController(ctx, this.settings);
     this.zones = createZones(ctx.layout);
 
-    const [{ HUD }, { Menus }] = await Promise.all([import('../../ui/hud.js'), import('../../ui/menus.js')]);
+    // the restyle's own interface by default (DUSKLINE); ?ui=legacy = the original HUD, title and menus
+    const UI_LEGACY = new URLSearchParams(location.search).get('ui') === 'legacy';
+    const [{ HUD }, { Menus }] = await Promise.all(UI_LEGACY ? [import('../../ui/hud.js'), import('../../ui/menus.js')] : [import('../../ui/v2/hud2.js'), import('../../ui/v2/menus2.js')]);
     this.hud = new HUD(ctx, this.settings);
+    // DUSKLINE photo mode (new interface only)
+    this.photo = UI_LEGACY ? null : new (await import('../../ui/v2/photo.js')).PhotoMode(ctx);
     this.menus = new Menus(this.hud.root, this.settings, {
       start: () => this.start(),
       resume: () => this.resume(true),
@@ -76,7 +83,22 @@ export default {
     this.avatar.object.visible = false;
 
     this.gigs = new Gigs(ctx, this.hud);
+    if (this.photo) this.photo.onCapture = (cam, shot) => this.gigs.photoTaken(cam, shot);
     this.hud.newGig(this.gigs.current, true);
+    // restyle map + DUSKLINE interface: the neon-tag collectible layer
+    if (ctx.layout.plaza && this.hud.root.id === 'dl') {
+      try {
+        const { Tags } = await import('./tags.js');
+        this.tags = new Tags(ctx, this.hud);
+        this.tags.onReward = (n) => { this.gigs.eddies += n; this.hud.addCredits?.(this.gigs.eddies, n); };
+      } catch (e) { console.warn('[player] tags failed', e); }
+      if (tacoEnabled(ctx.layout)) {
+        try { const { TacoTruck } = await import('./taco.js'); this.taco = new TacoTruck(ctx, this.hud); } catch (e) { console.warn('[player] taco failed', e); }
+      }
+      if (sprayEnabled(ctx.layout)) {
+        try { const { Spray } = await import('./spray.js'); this.spray = new Spray(ctx, this.hud); } catch (e) { console.warn('[player] spray failed', e); }
+      }
+    }
 
     // state
     this.state = 'title';
@@ -97,10 +119,12 @@ export default {
     document.addEventListener('pointerlockchange', () => {
       const locked = document.pointerLockElement === ctx.renderer.domElement;
       if (locked) this.hadLock = true;
+      else if (this.state === 'photo' && this.hadLock) { this.exitPhoto(); this.pause(); }
       else if (this.state === 'playing' && this.hadLock) this.pause();
     });
     addEventListener('keydown', (e) => {
       if (e.code !== 'Escape') return;
+      if (this.state === 'photo') { this.exitPhoto(); if (!document.pointerLockElement) this.pause(); return; } // (with a lock, losing it opens the pause menu)
       if (this.state === 'playing') this.pause();
       else if (this.state === 'paused' && performance.now() - this.pausedAt > 300) this.resume(false);
     });
@@ -114,6 +138,7 @@ export default {
       setYaw: (y, p = 0) => { this.ctrl.yaw = y; this.ctrl.pitch = p; },
       teleport: (x, y, z, yaw) => this.ctrl.placeAt(x, y, z, yaw),
       completeGig: () => this.gigs.complete(),
+      photo: (on = true) => (on ? this.enterPhoto() : this.exitPhoto()),
       ctrl: this.ctrl, gigs: this.gigs, hud: this.hud,
     };
   },
@@ -188,9 +213,31 @@ export default {
     this.state = 'paused'; this.api.state = 'paused'; this.ctx.paused = true;
     this.pausedAt = performance.now();
     this.menus.openPause();
-    this.menus.updateStats({ eddies: this.gigs.eddies, gigs: this.gigs.completed, cred: this.gigs.cred, zone: this.zone?.area, gig: this.gigs.state === 'active' ? this.gigs.current.title : 'WAITING FOR CALL', time: this.playTime, journal: this.gigs.journal() });
+    this.menus.updateStats({ eddies: this.gigs.eddies, gigs: this.gigs.completed, cred: this.gigs.cred, zone: this.zone?.area, gig: this.gigs.state === 'active' ? this.gigs.current.title : 'WAITING FOR CALL', time: this.playTime, journal: this.gigs.journal(), photos: this.photo?.film });
     this.hud.root.classList.add('state-paused');
     if (document.pointerLockElement) document.exitPointerLock?.();
+  },
+
+  radioToast(st) {
+    if (!st) return;
+    this.hud.toast({ k: `RADIO · ${st.name}`, h: st.show, body: st.song ? `<span>Now playing: <b>${st.song}</b> — ${st.artist}</span><span>[N] NEXT STATION</span>` : '<span>[N] NEXT STATION</span>' }, 3400);
+  },
+
+  enterPhoto() {
+    if (this.state !== 'playing' || !this.photo) return;
+    const ctx = this.ctx, cam = ctx.camera;
+    this.state = 'photo'; this.api.state = 'photo'; ctx.paused = true; ctx.photoFreeze = true;
+    const car = ctx.api.vehicles?.activeCar || this.car;
+    const anchor = this.api.mode === 'car' && carPosition(car) ? carPosition(car).clone().add(new THREE.Vector3(0, 1.0, 0)) : this.ctrl.feet.clone().add(new THREE.Vector3(0, 1.5, 0));
+    const z = this.zone || this.zones.at(this.object.position.x, this.object.position.y, this.object.position.z);
+    const clock = { dusk: '19:42', night: '23:18' }[TOD_NAME] || '00:00';
+    this.photo.enter(cam, anchor, `SOLANO HEIGHTS · ${(z?.area || 'NIGHT CITY').toUpperCase()} · ${clock} · EP 01`);
+  },
+
+  exitPhoto() {
+    if (this.state !== 'photo') return;
+    this.photo.exit(this.ctx.camera);
+    this.state = 'playing'; this.api.state = 'playing'; this.ctx.paused = false; this.ctx.photoFreeze = false;
   },
 
   resume(fromClick) {
@@ -225,7 +272,9 @@ export default {
     const p = carPosition(veh.activeCar || car);
     if (p) this.carPrev.copy(p);
     this.carSpeed = 0;
-    this.hud.toast({ kind: 'info', k: 'VEHICLE LINK ESTABLISHED', h: (car.name || car.model || 'VEHICLE').toString().toUpperCase(), body: '<span>[F] EXIT · [W/S] THROTTLE · [A/D] STEER</span>' }, 3000);
+    const own = this.hud.root.id === 'dl'; // restyle interface wording
+    this.hud.toast({ kind: 'info', k: own ? 'KEYS ARE IN IT' : 'VEHICLE LINK ESTABLISHED', h: (car.name || car.model || 'VEHICLE').toString().toUpperCase(), body: '<span>[F] EXIT · [W/S] THROTTLE · [A/D] STEER</span>' }, 3000);
+    if (own && this.ctx.layout.plaza) setTimeout(() => { if (this.car === car) this.radioToast(this.ctx.api.audio?.radioStation?.()); }, 1300); // (no radio card without the radio: audio=legacy)
   },
 
   exitCar() {
@@ -281,6 +330,19 @@ export default {
   titleCamera(dt, cam) {
     this.titleT += dt;
     const t = this.titleT;
+    const L = this.ctx.layout;
+    if (L.plaza) {
+      // restyle: a slow drone pass up the boulevard axis over the median palms and the intersection holograms
+      // (26 m: above the sky bridges (tops ~21 m) and the rail; the pass ends before the expressway deck)
+      const A = L.avenue, len = Math.min(A.zStart - 8 - (L.expressway.z + 40), A.zStart - A.zEnd - 120);
+      const z = A.zStart - 8 - (t * 3.2) % len;
+      cam.position.set(4.5 + Math.sin(t * 0.11) * 2.5, 26 + Math.sin(t * 0.17) * 1.0, z);
+      this._v.set(-2 + Math.sin(t * 0.07) * 4, 13, z - 75);
+      cam.lookAt(this._v);
+      cam.rotateZ(Math.sin(t * 0.13) * 0.02);
+      if (Math.abs(cam.fov - 52) > 0.01) { cam.fov = 52; cam.updateProjectionMatrix(); }
+      return;
+    }
     const sp = this.ctx.layout.spawn.position;
     const z = sp[2] + 14 - (t * 0.9) % 40;
     cam.position.set(sp[0] - 1.2 + Math.sin(t * 0.13) * 1.2, 3.2 + Math.sin(t * 0.21) * 0.4, z);
@@ -298,6 +360,10 @@ export default {
     const veh = ctx.api.vehicles;
 
     if (this.state === 'title') { this.titleCamera(dt, cam); this.hud.update(dt, this.hudState(ctx)); return; }
+    if (this.state === 'photo') {
+      if (input.justPressed('KeyP')) { this.exitPhoto(); input.pressed.delete('KeyP'); input.pressed.delete('KeyF'); } // (no re-entry / car swap this frame)
+      else { this.photo.update(dt, input, cam); return; }
+    }
 
     const playing = this.state === 'playing' || this.state === 'starting';
     if (this.state === 'playing') this.playTime += dt;
@@ -309,6 +375,7 @@ export default {
     if (this.state === 'playing') {
       if (input.justPressed('KeyV') && this.api.mode === 'foot') ctrl.toggleView();
       if (input.justPressed('KeyH')) this.settings.set('hud', !this.settings.get('hud'));
+      if (input.justPressed('KeyP') && this.photo) { this.enterPhoto(); return; }
     }
 
     let events = [];
@@ -362,10 +429,25 @@ export default {
     if (this.state === 'playing') {
       const gp = this.gigs.update(dt, t, ctrl.feet, this.api.mode);
       if (this.api.mode === 'car') {
+        if (this.hud.root.id === 'dl' && input.justPressed('KeyN')) this.radioToast(this.ctx.api.audio?.radioNext?.());
         if (input.justPressed('KeyF')) this.exitCar();
+        else if (this.spray) {
+          const car = veh?.activeCar || this.car;
+          this.prompt = this.spray.prompt(car, this.gigs.eddies);
+          if (this.prompt && input.justPressed('KeyG')) {
+            const cost = this.spray.apply(car, this.gigs.eddies);
+            if (cost) { this.gigs.eddies -= cost; this.hud.addCredits?.(this.gigs.eddies, -cost); }
+          }
+        }
       } else if (gp) {
         this.prompt = { key: gp.key, text: gp.text, sub: 'SERVICE ACCESS' };
         if (input.justPressed('KeyF')) this.fade(() => { ctrl.placeAt(gp.target[0] - 2, gp.target[1] + 3, gp.target[2] + 2); });
+      } else if (this.taco?.near(ctrl.feet)) {
+        this.prompt = this.taco.prompt(this.gigs.eddies);
+        if (input.justPressed('KeyF')) {
+          const cost = this.taco.buy(this.gigs.eddies);
+          if (cost) { this.gigs.eddies -= cost; this.hud.addCredits?.(this.gigs.eddies, -cost); this.hp = 100; this.hurtT = 99; }
+        }
       } else if (veh?.nearestCar) {
         let car = null;
         try { car = veh.nearestCar(ctrl.feet); } catch { car = null; }
@@ -390,6 +472,9 @@ export default {
       this.zoneT += dt;
       if (this.zoneT > 0.7 && this.zone !== z) { this.zone = z; this.hud.showDistrict(z); }
     }
+
+    // neon tags (on foot only; the car is too fast to read them)
+    if (this.tags) this.tags.update(dt, this.state === 'playing' && this.api.mode === 'foot' ? ctrl.feet : { x: 1e9, y: 0, z: 1e9 });
 
     // health regen + ram
     this.hurtT += dt;
@@ -446,7 +531,7 @@ export default {
       mode: this.api.mode, view: ctrl.view, speed: ctrl.speed, sprinting: ctrl.sprinting && ctrl.speed > 4.5, crouch: ctrl.crouch,
       zone: this.zone || this.zones.at(this.object.position.x, this.object.position.y, this.object.position.z),
       target, targetDist: dist, gig: active ? g.current : null, wp, prompt: this.prompt,
-      rain: ctx.weather?.rain, hp: this.hp, ram: this.ram,
+      rain: ctx.weather?.rain, hp: this.hp, ram: this.ram, pois: this.tags || this.spray ? [...(this.tags?.pois(this.object.position) || []), ...(this.spray && this.spray.S && Math.hypot(this.spray.S.x - this.object.position.x, this.spray.S.z - this.object.position.z) < 90 ? this.spray.pois() : []), ...(this.taco && Math.hypot(this.taco.S.x - this.object.position.x, this.taco.S.z - this.object.position.z) < 90 ? this.taco.pois() : [])] : undefined, gigTimer: this.gigs.timerLeft,
       carSpeed: this.carSpeed, carName: car ? (car.name || car.model || 'VEHICLE').toString().toUpperCase() : '', carReverse: !!car?.reverse,
     };
   },

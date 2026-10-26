@@ -45,8 +45,9 @@ export function roadMaterial(T, atlas) {
   const isAvF = B(float(G.avHalf).sub(ax).greaterThanEqual(float(G.crHalf).sub(adz)).or(crossValid.not())).toVar();
   const across = mix(dz, x, isAvF);                // coordinate across the current road
   const along = mix(x, z, isAvF);                  // coordinate along the current road
-  // lane-relative coordinate (avenue lanes 3m, cross lanes 5m)
-  const lr = mix(adz.sub(2.5), fract(ax.div(3)).mul(3).sub(1.5), isAvF).toVar();
+  // lane-relative coordinate (avenue lanes 3m, or the restyle map's lanes from the median curb; cross lanes 5m)
+  const L0 = G.lane0, LW = G.medHalf > 0 ? G.laneW : 3;
+  const lr = mix(adz.sub(2.5), fract(ax.sub(L0).div(LW)).mul(LW).sub(LW / 2), isAvF).toVar();
 
   // ---- asphalt base: two hex-tiled photoreal variants with macro blend --------------------------------------
   const tA = hexTaps(P.div(1.7), { scale: 0.42, sharp: 5 });
@@ -115,21 +116,28 @@ export function roadMaterial(T, atlas) {
   const wear = texture(T.paintWear.c, P.div(1.35)).r;
   // avenue frame
   const sAv = adz.sub(G.crHalf);
-  const apprAv = B(x.lessThan(0).and(dz.greaterThan(0)).or(x.greaterThan(0).and(dz.lessThan(0))));
+  // approach side of each intersection: left-hand traffic on the original map, right-hand on the restyle map
+  const RHT = G.medHalf > 0;
+  const apprAv = RHT ? B(x.greaterThan(0).and(dz.greaterThan(0)).or(x.lessThan(0).and(dz.lessThan(0))))
+    : B(x.lessThan(0).and(dz.greaterThan(0)).or(x.greaterThan(0).and(dz.lessThan(0))));
   const avLines = B(sAv.greaterThan(6.4)).mul(inAv).mul(isAvF);
-  const centerY = aaBand(ax.sub(0.17), 0.065).mul(avLines);
+  // (restyle map: no centre line - the median is geometry; a yellow solid line along the median curb instead,
+  //  dashed white divider between the two lanes of each direction)
+  const MED = G.medHalf > 0;
+  const centerY = aaBand(ax.sub(MED ? L0 + 0.12 : 0.17), 0.065).mul(avLines);
   const solidZone = B(sAv.lessThan(32));
   const dashA = B(fract(z.div(10)).lessThan(0.5));
-  const laneLn = aaBand(ax.sub(3.0), 0.075).mul(avLines);
-  const laneY = laneLn.mul(solidZone);
-  const laneW = laneLn.mul(solidZone.oneMinus()).mul(dashA);
-  const edgeA = aaBand(ax.sub(G.avHalf - 0.55), 0.075).mul(avLines);
-  const zebraA = stripe(x.add(0.225), 0.9, 0.5).mul(B(sAv.greaterThan(1.0).and(sAv.lessThan(5.0)).and(ax.lessThan(5.4)))).mul(inAv);
-  const stopA = aaBand(sAv.sub(6.0), 0.225).mul(apprAv).mul(B(ax.greaterThan(0.35).and(ax.lessThan(G.avHalf - 0.45)))).mul(inAv);
+  const laneLn = aaBand(ax.sub(MED ? L0 + LW : 3.0), 0.075).mul(avLines);
+  const laneY = MED ? laneLn.mul(0) : laneLn.mul(solidZone);
+  const laneW = MED ? laneLn.mul(mix(dashA, float(1), solidZone)) : laneLn.mul(solidZone.oneMinus()).mul(dashA);
+  const edgeA = aaBand(ax.sub(G.avHalf - (MED ? 0.35 : 0.55)), 0.075).mul(avLines);
+  const zebraA = stripe(x.add(0.225), 0.9, 0.5).mul(B(sAv.greaterThan(1.0).and(sAv.lessThan(5.0)).and(ax.lessThan(G.avHalf - 0.6)))).mul(inAv);
+  const stopA = aaBand(sAv.sub(6.0), 0.225).mul(apprAv).mul(B(ax.greaterThan(MED ? L0 : 0.35).and(ax.lessThan(G.avHalf - 0.45)))).mul(inAv);
   // glyph slots in approach lanes
-  const outer = B(ax.greaterThan(3.0));
-  const laneC = sign(x).mul(mix(1.5, 4.5, outer));
-  const uRaw = select(x.lessThan(0), x.sub(laneC), laneC.sub(x));
+  const outer = B(ax.greaterThan(MED ? L0 + LW : 3.0));
+  const laneC = sign(x).mul(MED ? mix(L0 + LW / 2, L0 + LW * 1.5, outer) : mix(1.5, 4.5, outer));
+  // glyph u runs to the approaching driver's right (northbound drivers face -z: right = +x)
+  const uRaw = RHT ? select(x.greaterThan(0), x.sub(laneC), laneC.sub(x)) : select(x.lessThan(0), x.sub(laneC), laneC.sub(x));
   const sl = (a, b) => B(sAv.greaterThanEqual(a).and(sAv.lessThan(b)));
   // slot table: [start, length, width, cell]
   const slots = [
@@ -138,7 +146,8 @@ export function roadMaterial(T, atlas) {
   let s0 = float(-100), sLen = float(1), sW = float(1), sCell = float(0), sOk = float(0);
   for (const [a, len, w, cell] of slots) {
     const inS = sl(a, a + len);
-    const c = cell === null ? mix(float(GLYPH.ARROW_R), float(GLYPH.ARROW_L), outer) : float(cell);
+    // turn arrows: the far-side turn from the inner lane, the kerb-side turn from the outer lane
+    const c = cell === null ? (RHT ? mix(float(GLYPH.ARROW_L), float(GLYPH.ARROW_R), outer) : mix(float(GLYPH.ARROW_R), float(GLYPH.ARROW_L), outer)) : float(cell);
     const ok = cell === GLYPH.BUS ? outer : float(1);
     s0 = mix(s0, float(a), inS); sLen = mix(sLen, float(len), inS); sW = mix(sW, float(w), inS); sCell = mix(sCell, c, inS); sOk = mix(sOk, ok, inS);
   }
@@ -149,7 +158,8 @@ export function roadMaterial(T, atlas) {
 
   // cross street frame
   const sCr = ax.sub(G.avHalf);
-  const apprCr = B(x.lessThan(0).and(dz.lessThan(0)).or(x.greaterThan(0).and(dz.greaterThan(0))));
+  const apprCr = RHT ? B(x.lessThan(0).and(dz.greaterThan(0)).or(x.greaterThan(0).and(dz.lessThan(0))))
+    : B(x.lessThan(0).and(dz.lessThan(0)).or(x.greaterThan(0).and(dz.greaterThan(0))));
   const crLines = B(sCr.greaterThan(6.4)).mul(inCr).mul(isAvF.oneMinus());
   const centerC = aaBand(dz, 0.075).mul(crLines).mul(B(fract(x.div(9)).lessThan(0.55)));
   const edgeC = aaBand(adz.sub(G.crHalf - 0.45), 0.07).mul(crLines);
@@ -206,7 +216,11 @@ export function roadMaterial(T, atlas) {
   // ---- manholes (avenue lane cells + cross street cells) ----------------------------------------------------
   const mCellA = floor(z.div(23.0));
   const mhA = hash23(vec2(mCellA, 5.3));
-  const mcA = vec2(floor(mhA.x.mul(4)).mul(3).sub(4.5).add(mhA.y.sub(0.5).mul(0.7)), mCellA.mul(23).add(4).add(mhA.z.mul(15)));
+  // (restyle map: manholes in the four lanes, never on the median)
+  const mhX = G.medHalf > 0
+    ? sign(mhA.x.sub(0.5)).mul(mix(float(G.lane0 + G.laneW * 0.5), float(G.lane0 + G.laneW * 1.5), step(0.5, fract(mhA.x.mul(2)))))
+    : floor(mhA.x.mul(4)).mul(3).sub(4.5);
+  const mcA = vec2(mhX.add(mhA.y.sub(0.5).mul(0.7)), mCellA.mul(23).add(4).add(mhA.z.mul(15)));
   const mExA = step(0.3, hash21(vec2(mCellA, 9.1)));
   const mCellC = floor(x.div(23.0));
   const mhC = hash23(vec2(mCellC, zc.mul(0.1).add(1.7)));

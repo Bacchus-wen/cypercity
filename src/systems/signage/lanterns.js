@@ -43,6 +43,14 @@ export async function buildLanterns(ctx, L, colorTex, pool, featured) {
   const paper = new Batch({ pivot: 3, cell: 4, lp: 4 });
   const caps = new Batch({ pivot: 3, cell: 4, lp: 4 });
   const wires = new Batch({ pivot: 3, cell: 4, lp: 4 });
+  // restyle map: festoon string lights (small bulbs on the wires) instead of chochin paper lanterns
+  const S2 = !!layout.plaza;
+  const bulbs = new Batch({ pivot: 3, cell: 4, lp: 4 });
+  const bulb = (p, ci) => {
+    const c = p.clone(); c.y -= 0.07;
+    bulbs.box(c, [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)], [0.032, 0.046, 0.032], { pivot: [c.x, c.y, c.z], cell: [ci, 0, 0, 0], lp: [0, 0, 0, 0] });
+  };
+  const bulbColor = () => { const r = rnd(); return r < 0.78 ? 0 : r < 0.9 ? 1 : 2; }; // warm white, pink, cyan
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
   const cellOf = (t) => { const r = L.lanternCells[t] || L.lanternCells['祭']; const uvr = r.uv; return [uvr[0], uvr[1], uvr[2] - uvr[0], uvr[3] - uvr[1]]; };
   let seed = 1;
@@ -82,6 +90,14 @@ export async function buildLanterns(ctx, L, colorTex, pool, featured) {
     // normal should point away from wall: rows are built from facade right; cross(up, right) = -normal → flip
     n.negate();
     wire(row.p0.clone().setY(row.p0.y + 0.18), row.p1.clone().setY(row.p1.y + 0.18), 0, 0.012);
+    if (S2) {
+      const len = row.p0.distanceTo(row.p1), nb = Math.max(2, Math.round(len / 0.45));
+      for (let i = 0; i <= nb; i++) bulb(row.p0.clone().lerp(row.p1, i / nb).setY(row.p0.y + 0.18 + (row.p1.y - row.p0.y) * (i / nb)), bulbColor());
+      const mid = row.p0.clone().lerp(row.p1, 0.5); mid.y += 0.18;
+      pool.add({ pos: mid.add(new THREE.Vector3(0, -0.4, 0)).addScaledVector(n, 0.4), color: [1, 0.78, 0.55], intensity: 4, distance: 8, seed: 1, ftype: 0, importance: 2 });
+      lightCount++;
+      continue;
+    }
     for (let i = 0; i < row.count; i++) {
       const t = row.count === 1 ? 0.5 : i / (row.count - 1);
       const p = row.p0.clone().lerp(row.p1, t);
@@ -97,6 +113,14 @@ export async function buildLanterns(ctx, L, colorTex, pool, featured) {
   const textsA = ['祭', '酒', '提灯', '居', '串', '焼鳥'];
   for (const s of featured.lanternStrings) {
     wire(s.a, s.b, s.sag, 0.006);
+    if (S2) {
+      const nb = Math.max(4, Math.round(s.a.distanceTo(s.b) / 0.5));
+      for (let i = 1; i < nb; i++) { const t = i / nb; const p = s.a.clone().lerp(s.b, t); p.y -= s.sag * 4 * t * (1 - t); bulb(p, bulbColor()); }
+      const mid = s.a.clone().lerp(s.b, 0.5); mid.y -= s.sag + 0.4;
+      pool.add({ pos: mid, color: [1, 0.72, 0.5], intensity: 4, distance: 8, seed: 1, ftype: 0, importance: 1.6 });
+      lightCount++;
+      continue;
+    }
     for (let i = 0; i < s.count; i++) {
       const t = (i + 0.5) / s.count;
       const p = s.a.clone().lerp(s.b, t); p.y -= s.sag * 4 * t * (1 - t);
@@ -109,7 +133,7 @@ export async function buildLanterns(ctx, L, colorTex, pool, featured) {
     lightCount++;
   }
   // tall cylindrical lanterns (やきとり)
-  for (const tl of featured.tallLanterns) {
+  for (const tl of S2 ? [] : featured.tallLanterns) {
     const p = tl.pos.clone(); p.y += 1.95;
     hang(T, p, Math.PI / 2, tl.text, 1, 1.1, 1, 0.25);
     pool.add({ pos: tl.pos.clone().add(new THREE.Vector3(0, 0.6, 0.6)), color: [1, 0.25, 0.06], intensity: 6, distance: 9, seed: 1, ftype: 0, importance: 3 });
@@ -119,7 +143,7 @@ export async function buildLanterns(ctx, L, colorTex, pool, featured) {
   // andon floor lanterns along the promenade (static: sway amp 0, kind 2 = warm white paper)
   const andon = new Batch({ pivot: 3, cell: 4, lp: 4 });
   const andonFrame = new Batch({ pivot: 3, cell: 4, lp: 4 });
-  if (A.paper) {
+  if (A.paper && !layout.river.canal) { // (restyle canal: lit by the LED lamp masts instead)
     const pr = layout.promenade;
     let k = 0;
     for (let z = pr.zStart - 8.5; z > pr.zEnd; z -= 18) {
@@ -177,6 +201,14 @@ export async function buildLanterns(ctx, L, colorTex, pool, featured) {
   add(paper, paperMat, 'lantern_paper');
   add(caps, capMat, 'lantern_caps');
   add(wires, wireMat, 'lantern_wires');
+  if (bulbs.count) {
+    const bm = new THREE.MeshBasicNodeMaterial();
+    const ci = cell.x;
+    const col = mix(mix(vec3(1.0, 0.78, 0.5), vec3(1.0, 0.3, 0.6), step(0.5, ci)), vec3(0.3, 0.9, 1.0), step(1.5, ci));
+    bm.colorNode = col.mul(3.2);
+    bm.lineMask = 1;
+    add(bulbs, bm, 'festoon_bulbs');
+  }
   add(andon, paperMat, 'andon_paper');
   add(andonFrame, frameMat, 'andon_frame');
   console.log(`[signage] lanterns: ${seed - 1} (lights ${lightCount})`);

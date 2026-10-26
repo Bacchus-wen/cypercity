@@ -7,6 +7,7 @@ import { uTime } from './materials.js';
 import { alleyGroundY } from './facades.js';
 import { nearestFacade, makeFacade } from './featured.js';
 import { propGltf } from '../propModels.js';
+import { signalState } from '../vehicles/traffic.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -36,6 +37,16 @@ function pedState(phase, t) { // 0 walk, 1 blink, 2 stop
   const c = ((t + 3) % CYCLE + CYCLE) % CYCLE;
   const local = phase === 0 ? c : (c + CYCLE / 2) % CYCLE;
   if (local < 6) return 0; if (local < 8) return (Math.floor(local * 4) % 2 ? 1 : 0); return 2;
+}
+// restyle map: the heads follow the traffic simulation's own cycle (vehicles/traffic.js signalState, 30 s, no
+// per-intersection offset there), so cars never run a red; walkers cross with the parallel car green
+const SC = { g: 0, y: 1, r: 2 };
+const sigState2 = (phase, t) => SC[signalState(t, 0)[phase === 0 ? 'avenue' : 'cross']];
+function pedState2(phase, t) {
+  const p = ((t % 30) + 30) % 30, a = phase === 0 ? p : p - 18; // avenue green 0-14, cross green 18-27
+  if (a >= 0 && a < (phase === 0 ? 10 : 6)) return 0;
+  if (a >= 0 && a < (phase === 0 ? 13 : 8.5)) return Math.floor(p * 4) % 2 ? 1 : 0;
+  return 2;
 }
 
 export async function buildStreet(ctx, sb, L) {
@@ -95,16 +106,18 @@ export async function buildStreet(ctx, sb, L) {
       sig.pos.push(v.x, v.y, v.z); sig.nor.push(n.x, n.y, n.z); sig.sig.push(phase, lamp);
       const uvv = uvFn ? uvFn(lu, lv) : [0, 0]; sig.uv.push(uvv[0], uvv[1]);
     }
-    const I = geom.index;
-    if (I) for (let i = 0; i < I.count; i++) sig.idx.push(base + I.getX(i)); else for (let i = 0; i < P.count; i++) sig.idx.push(base + i);
+    const I = geom.index, cnt = I ? I.count : P.count, at = (i) => (I ? I.getX(i) : i), flip = mat.determinant() < 0;
+    for (let i = 0; i + 2 < cnt; i += 3) sig.idx.push(base + at(i), base + at(flip ? i + 2 : i + 1), base + at(flip ? i + 1 : i + 2));
   };
-  const signalAt = (x, z, yaw, phase) => {
+  const MIRROR = new THREE.Vector3(-1, 1, 1);
+  const signalAt = (x, z, yaw, phase, mirror = false) => {
     if (!TS.body) return;
     const y = groundY(x, z) ?? sideY;
-    m4.compose(new THREE.Vector3(x, y, z), q.setFromAxisAngle(UP, yaw), one);
+    // (mirror: pole on the driver's right with the mast arm reaching left, for right-hand traffic)
+    m4.compose(new THREE.Vector3(x, y, z), q.setFromAxisAngle(UP, yaw), mirror ? MIRROR : one);
     each(TS.body, (g, mw) => sb.H.geometry(g, m4.clone().multiply(mw), { col: [0.42, 0.43, 0.43], mr: [0.8, 0.42] }));
     ['lensG', 'lensY', 'lensR'].forEach((nm, i) => each(TS[nm], (g, mw) => addLens(g, m4.clone().multiply(mw), phase, i)));
-    const hp = new THREE.Vector3(4.0, 5.2, 0).applyAxisAngle(UP, yaw).add(new THREE.Vector3(x, y, z));
+    const hp = new THREE.Vector3(mirror ? -4.0 : 4.0, 5.2, 0).applyAxisAngle(UP, yaw).add(new THREE.Vector3(x, y, z));
     const c = { pos: hp, color: [0, 1, 0.6], intensity: 10, distance: 13, importance: 2, phase, kind: 'sig' };
     sigCands.push(sb.pool.add(c));
     collider(x, y, z, 3, 0.14);
@@ -120,11 +133,19 @@ export async function buildStreet(ctx, sb, L) {
     collider(x, y, z, 1.5, 0.08);
   };
   const ex = av.roadHalfWidth + 0.6, ez = cs.roadHalfWidth + 0.6;
+  const RHT = !!av.medianHalf; // restyle map: right-hand traffic, far-side poles on the drivers' right
   for (const zc of cs.zs) {
-    signalAt(-ex, zc - ez, 0, 0);          // faces north-bound traffic
-    signalAt(ex, zc + ez, Math.PI, 0);     // south-bound
-    signalAt(ex, zc - ez, -Math.PI / 2, 1); // arm over cross street
-    signalAt(-ex, zc + ez, Math.PI / 2, 1);
+    if (RHT) {
+      signalAt(ex, zc - ez, 0, 0, true);            // north-bound (east lanes)
+      signalAt(-ex, zc + ez, Math.PI, 0, true);     // south-bound (west lanes)
+      signalAt(ex, zc + ez, -Math.PI / 2, 1, true); // east-bound (south half of the cross street)
+      signalAt(-ex, zc - ez, Math.PI / 2, 1, true); // west-bound
+    } else {
+      signalAt(-ex, zc - ez, 0, 0);          // faces north-bound traffic
+      signalAt(ex, zc + ez, Math.PI, 0);     // south-bound
+      signalAt(ex, zc - ez, -Math.PI / 2, 1); // arm over cross street
+      signalAt(-ex, zc + ez, Math.PI / 2, 1);
+    }
     // pedestrian signals at crosswalk ends (crossing the cross street => phase 0; crossing the avenue => phase 1)
     pedAt(-ex - 1.2, zc + ez + 0.4, 0, 0); pedAt(-ex - 1.2, zc - ez - 0.4, Math.PI, 0);
     pedAt(ex + 1.2, zc + ez + 0.4, 0, 0); pedAt(ex + 1.2, zc - ez - 0.4, Math.PI, 0);
@@ -176,7 +197,8 @@ export async function buildStreet(ctx, sb, L) {
     sb.bar(new THREE.Vector3(x, y, z), new THREE.Vector3(x, y + h + size * 0.4, z), 0.035, [0.6, 0.6, 0.6], [0.8, 0.4]);
     const c = new THREE.Vector3(x, y + h, z).addScaledVector(n, 0.05);
     sb.hbox(c.clone().addScaledVector(n, -0.01), [r, UP, n], [size / 2 * design.aspect, size / 2, 0.01], [0.5, 0.5, 0.5], [0.8, 0.4]);
-    sb.F.quad(c.clone().addScaledVector(n, 0.002), r, UP, size / 2 * design.aspect, size / 2, n, design.rect.uv, { tint: [1, 1, 1], sp: [3, 0.05, 0, 0], back: [0, 0, 0] });
+    // (restyle: retroreflective sheeting reads in the dusk/night anime light instead of going black)
+    sb.F.quad(c.clone().addScaledVector(n, 0.002), r, UP, size / 2 * design.aspect, size / 2, n, design.rect.uv, { tint: [1, 1, 1], sp: [3, ART_RESTYLE ? 0.4 : 0.05, 0, 0], back: [0, 0, 0] });
     collider(x, y, z, 1.2, 0.05);
   };
   for (const zc of cs.zs) {
@@ -191,7 +213,7 @@ export async function buildStreet(ctx, sb, L) {
     sb.bar(new THREE.Vector3(x, 6.2, z), new THREE.Vector3(x - 4.2, 6.2, z), 0.07, [0.5, 0.5, 0.5], [0.8, 0.4]);
     const c = new THREE.Vector3(x - 2.4, 5.4, z + 0.12);
     sb.hbox(c.clone().add(new THREE.Vector3(0, 0, -0.04)), [new THREE.Vector3(1, 0, 0), UP, new THREE.Vector3(0, 0, 1)], [1.6, 0.8, 0.03], [0.4, 0.4, 0.4], [0.8, 0.4]);
-    sb.F.quad(c, new THREE.Vector3(1, 0, 0), UP, 1.6, 0.8, new THREE.Vector3(0, 0, 1), L.misc.direction.rect.uv, { tint: [1, 1, 1], sp: [3, 0.08, 0, 0], back: [0, 0, 0] });
+    sb.F.quad(c, new THREE.Vector3(1, 0, 0), UP, 1.6, 0.8, new THREE.Vector3(0, 0, 1), L.misc.direction.rect.uv, { tint: [1, 1, 1], sp: [3, ART_RESTYLE ? 0.5 : 0.08, 0, 0], back: [0, 0, 0] });
     collider(x, 0, z, 3.2, 0.1);
   }
 
@@ -218,9 +240,10 @@ export async function buildStreet(ctx, sb, L) {
   const red = new THREE.Color(1, 0.06, 0.03), yel = new THREE.Color(1, 0.55, 0.05), grn = new THREE.Color(0.05, 1, 0.55);
   return {
     update(dt, t) {
-      uSig[0].value = sigState(0, t); uSig[1].value = sigState(1, t);
-      uSig[2].value = pedState(0, t); uSig[3].value = pedState(1, t);
-      for (const c of sigCands) { const s = sigState(c.phase, t); c.color.copy(s === 0 ? grn : s === 1 ? yel : red); }
+      const SS = RHT ? sigState2 : sigState, PS2 = RHT ? pedState2 : pedState;
+      uSig[0].value = SS(0, t); uSig[1].value = SS(1, t);
+      uSig[2].value = PS2(0, t); uSig[3].value = PS2(1, t);
+      for (const c of sigCands) { const s = SS(c.phase, t); c.color.copy(s === 0 ? grn : s === 1 ? yel : red); }
     },
   };
 }

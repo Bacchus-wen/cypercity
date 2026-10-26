@@ -10,6 +10,7 @@ import {
   texture, attribute,
 } from 'three/tsl';
 import { recolorNode } from '../../materials/recolor.js';
+import { ART_RESTYLE } from '../restyleArt.js';
 import { hash21, hash22, hash23, vnoise } from '../../materials/noise.js';
 import { wetUniforms } from '../../materials/wet.js';
 
@@ -141,13 +142,29 @@ export function makeStd(name, { color = 0x101010, metalness = 0, roughness = 0.5
 // or blacken the paint. Emissive texels are classed by car-local position: front 15% = head lamps (follow head),
 // rear 15% = tail lamps (tail, brighter on brake), the rest = decorative neon (dim when parked, full when driving).
 // The zones blend over 0.62..0.72 of the half length (about 14..19% of the car from each end).
-export function makeTex({ map, emissiveMap = null, emissiveIntensity = 1, halfLength = 2.3 }, state) {
+// Restyle cab livery (DUSKLINE): the Tripo taxi is painted as a cream / dark-green two-tone Tokyo cab. Repaint it in
+// texture space: the light cream panels become cab yellow, the green-grey body becomes graphite. Bright saturated
+// details (lamps, the red plate holder) are left alone.
+function cabLivery(lin) {
+  const c = pow(max(lin, vec3(0)), vec3(1 / 2.2));
+  const Y = dot(c, vec3(0.299, 0.587, 0.114));
+  const sat = max(max(c.x, c.y), c.z).sub(min(min(c.x, c.y), c.z));
+  const light = smoothstep(0.6, 0.72, Y).mul(smoothstep(0.38, 0.26, sat));
+  const dark = smoothstep(0.52, 0.4, Y).mul(smoothstep(0.2, 0.1, sat));
+  const yellow = vec3(0.96, 0.7, 0.1).mul(Y.div(0.86).min(1.1));
+  const graphite = vec3(Y.mul(0.55)).mul(vec3(1.0, 0.98, 1.04));
+  const g = mix(mix(c, graphite, dark), yellow, light);
+  return pow(g, vec3(2.2));
+}
+
+export function makeTex({ map, emissiveMap = null, emissiveIntensity = 1, halfLength = 2.3, livery = null }, state) {
   const m = new THREE.MeshStandardNodeMaterial();
   m.animeRim = 1; // anime look: hard rim light
   const rain = rainNodes({ strength: 0.45, streaks: false });
   const wet = vehUniforms.wet;
   const hue = state.w;
-  m.colorNode = recolorNode(texture(map).rgb, hue, { keepSkin: false }).mul(mix(float(1), float(0.88), wet));
+  const base = livery === 'cab' ? cabLivery(texture(map).rgb) : texture(map).rgb;
+  m.colorNode = recolorNode(base, hue, { keepSkin: false, keepRed: ART_RESTYLE }).mul(mix(float(1), float(0.88), wet)); // (restyle: red trim stays red)
   m.metalnessNode = float(0.05);
   m.roughnessNode = mix(float(0.58), float(0.3), wet).mul(float(1).sub(rain.mask.mul(0.5)));
   m.normalNode = perturbView(rain.offset, 0.7);
@@ -270,7 +287,7 @@ export function buildMaterialSet(type, solo = null, tex = null) {
     lights_aux: makeAux(type, L),
     lights_turn: makeTurn(L),
   };
-  if (tex) set.tex = makeTex(tex, solo ? vec4(solo.light, solo.hue) : attribute('iLight', 'vec4'));
+  if (tex) set.tex = makeTex(ART_RESTYLE && type === 'taxi' ? { ...tex, livery: 'cab' } : tex, solo ? vec4(solo.light, solo.hue) : attribute('iLight', 'vec4'));
   // anime look: light/dark values designed per material instead of one rule for everything
   //   animeFloor = lowest irradiance band, animeSpecTh = highlight threshold multiplier (higher = fewer highlights)
   const design = {

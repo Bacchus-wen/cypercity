@@ -75,7 +75,14 @@ export function populateFacades(sb, facades, L, layout) {
       const room = top - y0 - 0.8;
       if (room < 1.8) continue;
       const kind = rnd();
-      if (kind < 0.16 && room > 3) {
+      if (ART_RESTYLE && d !== 'alley' && kind > 0.42) {
+        // restyle: most street-level blades become flush horizontal signs (Western shop signage; the dense rows of
+        // projecting blades are the original's Kabukicho signature)
+        const ds = rnd() < 0.55 ? rnd.pick(lib.neonH) : rnd.pick(lib.boxH);
+        sb.flat(f, a, y0 + 0.7, ds, { width: Math.min(rnd.range(2.6, 4.4), w * 0.38), maxH: 1.25, depth: 0.12, importance: 0.9, lightMul });
+        continue;
+      }
+      if (kind < (ART_RESTYLE ? 0.06 : 0.16) && room > 3) {
         sb.tenantStack(f, a, y0, Math.min(Math.floor(room / 0.55), rnd.int(4, 12)));
       } else {
         const ds = kind < 0.6 ? pickNeonV() : pickBoxV();
@@ -91,7 +98,7 @@ export function populateFacades(sb, facades, L, layout) {
       const yc = base + k * f.floorHeight + f.floorHeight * 0.5;
       const r = rnd();
       const a = rnd.range(-0.3, 0.3) * w;
-      if (r < 0.25 && upperBlade < 2 && top - (yc - 1) > 4) {
+      if (r < (ART_RESTYLE ? 0.12 : 0.25) && upperBlade < 2 && top - (yc - 1) > 4) {
         // projecting blade on an upper floor (signs stacked at many heights, like Kabukicho)
         upperBlade++;
         sb.blade(f, (rnd() < 0.5 ? -1 : 1) * rnd.range(0.2, 0.45) * w, yc - 1, rnd() < 0.6 ? pickNeonV() : pickBoxV(), { maxH: Math.min(top - yc, rnd.range(3, 7)), lightMul: lightMul * 0.7, importance: 0.8 });

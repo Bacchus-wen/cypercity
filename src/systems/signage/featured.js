@@ -73,11 +73,15 @@ export async function buildFeatured(ctx, sb, facades, L) {
   // ---------- 3. Overlook: blue ネオン NEON vertical sign close on the right (ref panel 2)
   {
     const [ox, oy, oz] = lay.overlook.position;
-    const f = makeFacade(new THREE.Vector3(ox + 8.2, oy, oz - 5.5), new THREE.Vector3(-1, 0, 0.25), 2, 20);
+    // (restyle map: on a pole at the east sidewalk end, beside the skydeck)
+    const TW = lay.overlook.tower;
+    // (restyle map: a projecting blade on the skydeck tower's north face, seen from the boulevard; no mast)
+    const f = TW ? makeFacade(new THREE.Vector3(ox + 6.5, oy - 14, lay.avenue.zStart + 7), new THREE.Vector3(0, 0, -1), 2, 20)
+      : makeFacade(new THREE.Vector3(ox + 8.2, oy, oz - 5.5), new THREE.Vector3(-1, 0, 0.25), 2, 20);
     const ds = L.misc.neonOverlook || byText(L.neonV, 'ネオン');
-    sb.blade(f, 0, oy - 2.4, ds, { depth: 1.35, maxH: 7.8, tint: NEON.blue, inten: 8, ftype: 0, edge: true, gap: 0.3, importance: 4 });
+    sb.blade(f, 0, TW ? oy - 14 : oy - 2.4, ds, { depth: 1.35, maxH: 7.8, tint: NEON.blue, inten: 8, ftype: 0, edge: true, gap: 0.3, importance: 4 });
     // supporting mast for the free-standing overlook sign
-    sb.bar(new THREE.Vector3(f.center.x, oy - 12, f.center.z), new THREE.Vector3(f.center.x, oy + 5, f.center.z), 0.12, [0.1, 0.1, 0.11], [0.8, 0.5]);
+    if (!TW) sb.bar(new THREE.Vector3(f.center.x, oy - 12, f.center.z), new THREE.Vector3(f.center.x, oy + 5, f.center.z), 0.12, [0.1, 0.1, 0.11], [0.8, 0.5]);
   }
 
   // ---------- 4. Alley set dressing (ref panel 4)
@@ -131,7 +135,7 @@ export async function buildFeatured(ctx, sb, facades, L) {
   if (izF) {
     reserved.add(izF);
     const base = izF.center.y - izF.height / 2;
-    sb.flat(izF, 0, base + 3.6, byText(L.neonH, 'IZAKAYA'), { width: 4.2, maxH: 1, depth: 0.12, tint: NEON.amber, importance: 2 });
+    sb.flat(izF, 0, base + 3.6, byText(L.neonH, ART_RESTYLE ? 'TAPROOM' : 'IZAKAYA'), { width: 4.2, maxH: 1, depth: 0.12, tint: NEON.amber, importance: 2 });
     sb.blade(izF, -izF.width / 2 + 1.2, base + 4.5, byText(L.neonV, '居酒屋'), { depth: 1.2, maxH: 6, tint: NEON.red, importance: 2 });
     sb.blade(izF, izF.width / 2 - 1.2, base + 5.0, byText(L.neonV, 'ホテル'), { depth: 1.2, maxH: 7, tint: NEON.violet, importance: 2 });
     const p0 = izF.center.clone().addScaledVector(izF.right, -2.4).addScaledVector(izF.normal, 0.6); p0.y = base + 2.9;

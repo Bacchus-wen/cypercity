@@ -9,6 +9,7 @@ export function buildAlley(ctx, lots, B, out) {
   const A = L.alley;
   const S = A.stairs;
   const rng = mulberry32(0xA11E);
+  const S2 = !!L.plaza; // restyle map: covered passage, steel stairs
   const zN = A.z - A.width / 2, zS = A.z + A.width / 2, zc = A.z, w = A.width;
   const fac = (x) => B.get(x, zc, 'facade', FACADE_ATTRS);
   const det = (x) => B.get(x, zc, 'detail', DETAIL_ATTRS);
@@ -32,9 +33,16 @@ export function buildAlley(ctx, lots, B, out) {
     for (let i = 0; i < n; i++) {
       const x0 = f.xa - i * tread, x1 = x0 - tread;
       const yTop = f.ya + (i + 1) * riser;
-      fac(x0).box((x0 + x1) / 2 - 0.02, yTop / 2, zc, tread + 0.04, yTop, w, trimAttr(1, 1.6, 0.3 + rng() * 0.15, 0.77 + rng() * 0.2));
-      // worn nosing strip (darker metal edge)
-      det(x0).box(x0 - 0.03, yTop - 0.01, zc, 0.05, 0.025, w - 0.1, { aCol: [0.12, 0.12, 0.11, 0], aPbr: [0.3, 0.8, 0, 0.6] });
+      if (S2) {
+        // restyle map: dark steel treads on a concrete stringer block, lit amber nosing
+        fac(x0).box((x0 + x1) / 2 - 0.02, (yTop - 0.06) / 2, zc, tread + 0.04, yTop - 0.06, w, trimAttr(1, 1.6, 0.22, 0.6));
+        det(x0).box((x0 + x1) / 2 - 0.02, yTop - 0.03, zc, tread + 0.04, 0.06, w - 0.02, { aCol: [0.07, 0.075, 0.085, 0], aPbr: [0.35, 0.85, 0, 0.5] });
+        det(x0).box(x0 - 0.03, yTop - 0.005, zc, 0.04, 0.02, w - 0.5, { aCol: [1.0, 0.62, 0.18, 2.6], aPbr: [0.5, 0, 0, 0] });
+      } else {
+        fac(x0).box((x0 + x1) / 2 - 0.02, yTop / 2, zc, tread + 0.04, yTop, w, trimAttr(1, 1.6, 0.3 + rng() * 0.15, 0.77 + rng() * 0.2));
+        // worn nosing strip (darker metal edge)
+        det(x0).box(x0 - 0.03, yTop - 0.01, zc, 0.05, 0.025, w - 0.1, { aCol: [0.12, 0.12, 0.11, 0], aPbr: [0.3, 0.8, 0, 0.6] });
+      }
     }
     // ramp collider along the flight
     const len = Math.hypot(run, rise), ang = Math.atan2(rise, run);
@@ -136,5 +144,33 @@ export function buildAlley(ctx, lots, B, out) {
       // gas cylinders
       for (let k = 0; k < 2; k++) det(x).box(x + k * 0.35, y + 0.6, z, 0.3, 1.2, 0.3, { aCol: [0.6, 0.6, 0.58, 0], aPbr: [0.4, 0.5, 0, 0.6] });
     }
+  }
+
+  // ---- restyle map: high glazed canopy over the lower passage (steel trusses, LED tubes, translucent panels);
+  // the stairs stay open to the sky, so the alley reads as a covered passage opening onto the climb
+  if (S2) {
+    const cy = 8.2, x0c = A.xStart - 0.4, x1c = S.xStart + 0.6;
+    const steel = { aCol: [0.06, 0.065, 0.075, 0], aPbr: [0.35, 0.85, 0, 0.5] };
+    for (const z of [zN + 0.12, zS - 0.12]) det((x0c + x1c) / 2).box((x0c + x1c) / 2, cy, z, x0c - x1c, 0.22, 0.16, steel); // edge beams on the walls
+    let k = 0;
+    for (let x = x0c - 0.2; x > x1c; x -= 3.1, k++) {
+      det(x).box(x, cy, zc, 0.14, 0.2, w - 0.1, steel);                                   // cross beam
+      det(x).box(x, cy + 0.55, zc, 0.08, 0.08, w - 0.4, steel);                           // ridge chord
+      for (const z of [zN + 0.3, zS - 0.3]) det(x).beam([x, cy + 0.1, z], [x, cy + 0.55, zc], 0.04, steel);
+      const led = k % 3 === 2 ? [1.0, 0.3, 0.62, 4.5] : [0.72, 0.92, 1.0, 4.5];
+      det(x).box(x, cy - 0.16, zc, 0.06, 0.05, w - 0.9, { aCol: led, aPbr: [0.5, 0, 0, 0] }); // LED tube under the beam
+      if (k % 2 === 0) out.lights.push({ pos: [x, cy - 0.6, zc], color: k % 3 === 2 ? [1, 0.35, 0.65] : [0.75, 0.9, 1], intensity: 5, distance: 11 });
+    }
+    // translucent ribbed panels (gabled), one transparent mesh
+    const rise = 0.55;
+    const geo = new THREE.BufferGeometry();
+    const xa = x1c, xb = x0c, y0 = cy + 0.1, y1 = cy + 0.1 + rise;
+    const P = [xa, y0, zN + 0.1, xb, y0, zN + 0.1, xb, y1, zc, xa, y1, zc, xa, y1, zc, xb, y1, zc, xb, y0, zS - 0.1, xa, y0, zS - 0.1];
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+    geo.setIndex([0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7]);
+    geo.computeVertexNormals();
+    const pm = new THREE.MeshStandardNodeMaterial({ color: 0x9fb8c4, roughness: 0.35, metalness: 0, transparent: true, opacity: 0.32, side: THREE.DoubleSide, depthWrite: false });
+    const roof = new THREE.Mesh(geo, pm); roof.name = 'alley_canopy'; roof.renderOrder = 2;
+    ctx.scene.add(roof);
   }
 }

@@ -11,7 +11,9 @@ import { buildProps } from './props.js';
 import { buildCables } from './cables.js';
 import { buildAlley } from './alley.js';
 import { buildOverlook } from './overlook.js';
-import { artPath } from '../restyleArt.js';
+import { artPath, ART_RESTYLE } from '../restyleArt.js';
+import { buildRooftops2 } from './rooftops2.js';
+import { planLedWraps, buildLedWraps } from './ledwraps.js';
 import { TOD } from '../../engine/timeOfDay.js';
 
 async function loadImage(url) {
@@ -80,6 +82,8 @@ export default {
       const ducts = buildDucts(lots, B, IX);
       console.log(`[buildings] massing: ${ducts} ducts, ${bridges.length} sky bridges (${bridges.map((b) => (b.axis === 'x' ? `z${b.c.toFixed(0)}` : `x${b.c.toFixed(0)}/z${b.z}`) + `@${b.y0.toFixed(0)}`).join(' ')}), ${pods} pods, ${stairs} stair towers`);
     }
+    // restyle LED ribbons: planned before the facade API so the signage keeps clear of them
+    const ledPlan = ART_RESTYLE ? planLedWraps(lots, L) : [];
 
     // ---------- shopfronts ----------
     const shops = new ShopBuilder(B, out);
@@ -123,6 +127,8 @@ export default {
       tris += geo.index.count / 3; meshes++;
     }
     for (const m of inst) group.add(m);
+    if (ART_RESTYLE) { try { for (const m of buildRooftops2(ctx, lots)) group.add(m); } catch (e) { console.error('[buildings] rooftops2 failed', e); } }
+    if (ledPlan.length) { try { for (const m of buildLedWraps(ledPlan)) group.add(m); } catch (e) { console.error('[buildings] LED ribbons failed', e); } }
     scene.add(group);
     this.group = group;
 

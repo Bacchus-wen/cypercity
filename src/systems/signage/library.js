@@ -12,9 +12,12 @@ const RESTYLE_TEXT = {
   'ホテル': 'HOTEL', 'カフェ': 'CAFE', 'パチンコ': 'SLOTS', '麻雀': 'MAHJONG', '焼肉': 'BBQ', 'ゲーム': 'GAMES', '喫茶': 'COFFEE',
   'スナック': 'LOUNGE', 'クラブ': 'CLUB', 'バー': 'BAR', '餃子': 'GYOZA', 'うどん': 'NOODLE', '質屋': 'LOANS', 'マッサージ': 'MASSAGE',
   '漫画喫茶': 'NETCAFE', '中華': 'WOK', '銭湯': 'BATHS', '本日開店': 'OPEN', '整骨院': 'CLINIC', '立呑み': 'PUB', '串カツ': 'SKEWER',
-  // kept as accents: 寿司 電脳 夜市 薬 酒場 占い
-  'ネットカフェ': 'NET CAFE 24', 'カラオケ館': 'KARAOKE HALL', '焼肉 鉄火': 'TEKKA GRILL', '焼鳥 灯': 'AKARI SKEWERS',
-  '黒潮': 'KUROSHIO',
+  // (no Japanese left on the restyle: a harbour boulevard of taquerias, pawn shops and motels instead of Kabukicho;
+  //  vertical blade words stay short so the shared neon / colour atlases keep their room)
+  '寿司': 'TACO', '電脳': 'NET', '夜市': 'NITE', '薬': 'RX', '酒場': 'TAP', '占い': 'FATE',
+  'ネットカフェ': 'NET CAFE 24', 'カラオケ館': 'KARAOKE HALL', '焼肉 鉄火': 'IRON FLAME', '焼鳥 灯': 'LAMPLIGHT GRILL',
+  '黒潮': 'NOODLE TIDE', 'IZAKAYA': 'TAPROOM', 'PACHINKO': 'CASINO', 'SAKE': 'BEER', 'SUSHI': 'TACOS', 'GAME CENTER': 'ARCADE',
+  'MINATO BANK': 'SOLANO BANK', 'Sushi': 'Tacos',
 };
 const show = (t) => (ART_RESTYLE ? RESTYLE_TEXT[t] ?? t : t);
 const isJP = (t) => /[^\x00-\x7f]/.test(t);
@@ -88,7 +91,7 @@ export async function buildLibrary(images) {
     if (rnd() < 0.6) items.push({ type: 'rect', x: 12, y: 12, w: W - 24, h: H - 24, r: 30, lw: 5 });
     put(L.neonH, NA.add({ w: W, h: H, items }), 0, { text: txt });
   });
-  SCRIPT_TXT.forEach((txt) => {
+  (ART_RESTYLE ? SCRIPT_TXT.map(show) : SCRIPT_TXT).forEach((txt) => {
     const W = 460, H = 220;
     const items = [{ type: 'text', text: txt, x: W / 2, y: H / 2 + 8, size: 126, font: FONTS.script, weight: 400, style: 'fill', lw: 6, maxW: W - 60 }];
     if (rnd() < 0.5) items.push({ type: 'path', pts: [[60, H - 50], [W - 60, H - 50]], lw: 7 });
@@ -159,7 +162,7 @@ export async function buildLibrary(images) {
         g.restore();
       } else textVertical(g, dt, W / 2, 52, H - 52, isJP(dt) ? FONTS.goth : FONTS.bahn, 900, isJP(dt) ? 112 : 92, s.fg);
       // small latin sub-text in bands
-      g.fillStyle = s.bg; g.font = `700 15px ${FONTS.bahn}`; g.textAlign = 'center'; g.fillText('SINCE 2079', W / 2, 18);
+      g.fillStyle = s.bg; g.font = `700 15px ${FONTS.bahn}`; g.textAlign = 'center'; g.fillText(ART_RESTYLE ? 'OPEN LATE' : 'SINCE 2079', W / 2, 18);
     }), 1, { text: txt });
   });
   // canvas light boxes – horizontal fascia (shop name + sub line)
@@ -169,11 +172,11 @@ export async function buildLibrary(images) {
     ['HARBOR POD', 'HOTEL · NEST 8'], ['シナプス義体院', 'SYNAPSE+ CLINIC'], ['うどん 潮', 'UDON'], ['餃子 汐', 'GYOZA'], ['BYTE DEN', 'NET CAFE'], ['立呑み 港', 'STANDING BAR']];
   // restyle: English name first, the Japanese name (if any) moves to the small sub line
   const FASC_R = {
-    '麺屋 黒潮': ['KUROSHIO', 'RAMEN · 麺屋 黒潮'], '居酒屋 灯': ['AKARI', 'BAR & GRILL · 灯'], 'カラオケ': ['ECHO FIN', 'KARAOKE BOXES'],
-    '寿司 波止場': ['HATOBA', 'SUSHI · 寿司'], '焼肉 鉄火': ['TEKKA', 'BBQ GRILL'], 'ゲームハイブ': ['GAME HIVE', 'ARCADE · VR'],
-    'パチンコ 流星': ['RYUSEI', 'SLOTS · OPEN 24H'], '中華 青龍': ['BLUE DRAGON', 'WOK · NOODLES'], '喫茶 雨音': ['AMANE', 'COFFEE · 喫茶'],
-    '質 波屋': ['NAMIYA', 'PAWN · LOANS'], 'シナプス義体院': ['SYNAPSE+', 'CHROME CLINIC'], 'うどん 潮': ['USHIO', 'NOODLE BAR'],
-    '餃子 汐': ['SHIO', 'DUMPLINGS'], '立呑み 港': ['MINATO', 'STANDING BAR'],
+    '麺屋 黒潮': ['NOODLE TIDE', 'RAMEN · OPEN LATE'], '居酒屋 灯': ['LAMPLIGHT', 'BAR & GRILL'], 'カラオケ': ['ECHO FIN', 'KARAOKE BOXES'],
+    'AMEDROP': ['AMEDROP', 'DRUG & BEAUTY'], '寿司 波止場': ['PIER 9', 'TACOS · SUSHI · POKE'], '焼肉 鉄火': ['IRON FLAME', 'KOREAN BBQ'],
+    'ゲームハイブ': ['GAME HIVE', 'ARCADE · VR'], 'パチンコ 流星': ['LUCKY STAR', 'CASINO · OPEN 24H'], '中華 青龍': ['BLUE DRAGON', 'WOK · NOODLES'],
+    '喫茶 雨音': ['RAINDROP', 'COFFEE · DONUTS'], '質 波屋': ['WAVE PAWN', 'GOLD · LOANS'], 'シナプス義体院': ['SYNAPSE+', 'CHROME CLINIC'],
+    'うどん 潮': ['SALT & BROTH', 'NOODLE BAR'], '餃子 汐': ['DUMPLING DEN', 'OPEN LATE'], '立呑み 港': ['HARBOR TAP', 'CRAFT BEER'],
   };
   fasc.forEach(([a, b], i) => {
     const s = schemes[(i * 5 + 3) % schemes.length];
@@ -190,7 +193,7 @@ export async function buildLibrary(images) {
   });
   // small tenant-directory boxes (stacked zakkyo building signs)
   const tenants = ART_RESTYLE
-    ? ['BAR NOIR', 'PUB 23', 'DARTS', 'NAILS', 'TATTOO', 'LOANS', 'CLINIC 4F', 'MAHJONG', 'KARAOKE', 'LOUNGE', 'SNACK MAMA', 'DENTIST', 'TAROT', 'MASSAGE', 'GYM', 'PAWN', 'SALON', 'POOL', '雀荘', 'BAR 月']
+    ? ['BAR NOIR', 'PUB 23', 'DARTS', 'NAILS', 'TATTOO', 'LOANS', 'CLINIC 4F', 'MAHJONG', 'KARAOKE', 'LOUNGE', 'SNACK MAMA', 'DENTIST', 'TAROT', 'MASSAGE', 'GYM', 'PAWN', 'SALON', 'POOL', 'CARDS', 'BAR LUNA']
     : ['スナック 恋', 'BAR 月', '麻雀 東', 'クラブ 蝶', 'マッサージ', '占い 星', '歯科', '質 屋', 'ラウンジ 華', '英会話', '整体', 'カラオケ', 'BAR NOIR', '鍼灸', 'PUB 23', '雀荘', '焼鳥 鳥八', 'ダーツ', 'SNACK MAMA', 'ネイル'];
   tenants.forEach((t, i) => {
     const s = schemes[(i * 7 + 1) % schemes.length];
@@ -220,20 +223,27 @@ export async function buildLibrary(images) {
   }), 1);
   L.misc.parkingSub = put([], CA.add(256, 512, (g) => {
     g.fillStyle = '#f5f5f5'; g.fillRect(0, 0, 256, 512);
-    textVertical(g, '駐車場', 128, 30, 330, FONTS.goth, 900, 150, '#1050d0');
-    g.fillStyle = '#1aa040'; g.fillRect(28, 360, 200, 120);
-    textCentered(g, '空', 128, 420, FONTS.goth, 900, 120, 100, '#ffffff');
+    if (ART_RESTYLE) { // restyle: English garage sign
+      g.save(); g.translate(128, 180); g.rotate(Math.PI / 2); textCentered(g, 'PARKING', 0, 0, FONTS.bahn, 900, 300, 120, '#1050d0'); g.restore();
+      g.fillStyle = '#1aa040'; g.fillRect(28, 360, 200, 120);
+      textCentered(g, 'OPEN', 128, 420, FONTS.bahn, 900, 180, 72, '#ffffff');
+    } else {
+      textVertical(g, '駐車場', 128, 30, 330, FONTS.goth, 900, 150, '#1050d0');
+      g.fillStyle = '#1aa040'; g.fillRect(28, 360, 200, 120);
+      textCentered(g, '空', 128, 420, FONTS.goth, 900, 120, 100, '#ffffff');
+    }
   }), 1);
   L.misc.goodgames = put([], CA.add(1024, 384, (g) => {
     g.fillStyle = '#000'; g.fillRect(0, 0, 1024, 384);
-    textCentered(g, 'GOOD GAMES', 512, 120, FONTS.bahn, 700, 960, 150, '#f4f2ee');
-    textCentered(g, 'GOOD PEOPLE', 512, 280, FONTS.bahn, 700, 960, 150, '#f4f2ee');
+    // (restyle: the alley's own wall slogan instead of the reference panel's)
+    textCentered(g, ART_RESTYLE ? 'STAY OUT' : 'GOOD GAMES', 512, 120, FONTS.bahn, 700, 960, 150, '#f4f2ee');
+    textCentered(g, ART_RESTYLE ? 'LATE, KID' : 'GOOD PEOPLE', 512, 280, FONTS.bahn, 700, 960, 150, ART_RESTYLE ? '#ff2d3d' : '#f4f2ee');
   }), 3);
   L.misc.nomiya = put([], CA.add(700, 300, (g) => {
     g.fillStyle = ART_RESTYLE ? '#16161a' : '#f4eee0'; g.fillRect(0, 0, 700, 300);
     g.strokeStyle = '#a01010'; g.lineWidth = 10; g.strokeRect(10, 10, 680, 280);
     textCentered(g, ART_RESTYLE ? 'DRINKS' : '飲み屋', 350, 120, ART_RESTYLE ? FONTS.bahn : FONTS.mincho, 900, 600, 170, ART_RESTYLE ? '#f2efe8' : '#151010');
-    textCentered(g, ART_RESTYLE ? '飲み屋 · IZAKAYA' : 'IZAKAYA', 350, 245, FONTS.bahn, 700, 400, 60, '#a01010');
+    textCentered(g, ART_RESTYLE ? 'COCKTAILS · LATE' : 'IZAKAYA', 350, 245, FONTS.bahn, 700, 400, 60, '#a01010');
   }), 1);
   L.misc.sign24 = put([], CA.add(256, 256, (g) => {
     g.fillStyle = '#101010'; g.fillRect(0, 0, 256, 256);
@@ -244,22 +254,46 @@ export async function buildLibrary(images) {
     g.clearRect(0, 0, 256, 256); g.fillStyle = '#101010'; g.fillRect(0, 0, 256, 256);
     g.fillStyle = '#ffffff'; g.beginPath(); g.moveTo(10, 20); g.lineTo(246, 20); g.lineTo(128, 236); g.closePath(); g.fill();
     g.fillStyle = '#d01818'; g.beginPath(); g.moveTo(30, 32); g.lineTo(226, 32); g.lineTo(128, 214); g.closePath(); g.fill();
-    textCentered(g, '止まれ', 128, 82, FONTS.goth, 900, 140, 50, '#ffffff');
+    textCentered(g, ART_RESTYLE ? 'YIELD' : '止まれ', 128, 82, ART_RESTYLE ? FONTS.bahn : FONTS.goth, 900, 140, 50, '#ffffff');
   }), 3);
-  L.misc.speed = put([], CA.add(256, 256, (g) => {
+  L.misc.speed = put([], CA.add(256, 256, ART_RESTYLE ? (g) => {
+    // restyle: white rectangular SPEED LIMIT sign
+    g.fillStyle = '#101010'; g.fillRect(0, 0, 256, 256);
+    g.fillStyle = '#f4f4f0'; g.fillRect(40, 10, 176, 236);
+    g.strokeStyle = '#101010'; g.lineWidth = 6; g.strokeRect(50, 20, 156, 216);
+    textCentered(g, 'SPEED', 128, 56, FONTS.bahn, 800, 140, 34, '#101010'); textCentered(g, 'LIMIT', 128, 92, FONTS.bahn, 800, 140, 34, '#101010');
+    textCentered(g, '25', 128, 170, FONTS.bahn, 800, 140, 110, '#101010');
+  } : (g) => {
     g.fillStyle = '#101010'; g.fillRect(0, 0, 256, 256);
     g.fillStyle = '#fff'; g.beginPath(); g.arc(128, 128, 124, 0, 7); g.fill();
     g.fillStyle = '#d01818'; g.beginPath(); g.arc(128, 128, 118, 0, 7); g.fill();
     g.fillStyle = '#fff'; g.beginPath(); g.arc(128, 128, 92, 0, 7); g.fill();
     textCentered(g, '40', 128, 132, FONTS.bahn, 700, 140, 110, '#1040a0');
   }), 3);
-  L.misc.crossing = put([], CA.add(256, 256, (g) => {
+  L.misc.crossing = put([], CA.add(256, 256, ART_RESTYLE ? (g) => {
+    // restyle: yellow diamond pedestrian-crossing sign
+    g.fillStyle = '#0c0c0e'; g.fillRect(0, 0, 256, 256);
+    g.fillStyle = '#f2c200'; g.beginPath(); g.moveTo(128, 6); g.lineTo(250, 128); g.lineTo(128, 250); g.lineTo(6, 128); g.closePath(); g.fill();
+    g.strokeStyle = '#111'; g.lineWidth = 7; g.beginPath(); g.moveTo(128, 22); g.lineTo(234, 128); g.lineTo(128, 234); g.lineTo(22, 128); g.closePath(); g.stroke();
+    g.fillStyle = '#111'; g.beginPath(); g.arc(132, 72, 15, 0, 7); g.fill();
+    g.lineCap = 'round'; g.lineWidth = 15;
+    g.beginPath(); g.moveTo(128, 96); g.lineTo(118, 146); g.lineTo(96, 186); g.moveTo(118, 146); g.lineTo(146, 186); g.moveTo(126, 106); g.lineTo(100, 130); g.moveTo(126, 106); g.lineTo(156, 126); g.stroke();
+  } : (g) => {
     g.fillStyle = '#1050c0'; g.fillRect(0, 0, 256, 256);
     g.fillStyle = '#fff'; g.beginPath(); g.moveTo(128, 26); g.lineTo(232, 214); g.lineTo(24, 214); g.closePath(); g.fill();
     g.fillStyle = '#101010'; g.beginPath(); g.arc(128, 96, 14, 0, 7); g.fill(); g.fillRect(118, 112, 20, 50);
     g.fillRect(100, 180, 56, 10);
   }), 3);
-  L.misc.direction = put([], CA.add(768, 384, (g) => {
+  L.misc.direction = put([], CA.add(768, 384, ART_RESTYLE ? (g) => {
+    // restyle: green guide sign, English destinations
+    g.fillStyle = '#1fa862'; g.fillRect(0, 0, 768, 384);
+    g.strokeStyle = '#fff'; g.lineWidth = 8; g.strokeRect(12, 12, 744, 360);
+    g.fillStyle = '#fff'; g.fillRect(372, 60, 24, 300); g.beginPath(); g.moveTo(384, 30); g.lineTo(430, 90); g.lineTo(338, 90); g.closePath(); g.fill();
+    g.fillRect(80, 220, 300, 24); g.beginPath(); g.moveTo(50, 232); g.lineTo(110, 190); g.lineTo(110, 274); g.closePath(); g.fill();
+    textCentered(g, 'PLAZA', 200, 140, FONTS.bahn, 800, 250, 74, '#fff'); textCentered(g, 'Monument Sq', 200, 300, FONTS.bahn, 600, 250, 40, '#fff');
+    textCentered(g, 'SOLANO', 590, 130, FONTS.bahn, 800, 280, 74, '#fff'); textCentered(g, 'Boulevard N', 590, 210, FONTS.bahn, 600, 280, 40, '#fff');
+    textCentered(g, 'CANAL WARD', 590, 300, FONTS.bahn, 800, 300, 52, '#fff');
+  } : (g) => {
     g.fillStyle = '#1048b8'; g.fillRect(0, 0, 768, 384);
     g.strokeStyle = '#fff'; g.lineWidth = 8; g.strokeRect(12, 12, 744, 360);
     g.fillStyle = '#fff'; g.fillRect(372, 60, 24, 300); g.beginPath(); g.moveTo(384, 30); g.lineTo(430, 90); g.lineTo(338, 90); g.closePath(); g.fill();
@@ -296,8 +330,9 @@ export async function buildLibrary(images) {
   // brand logo glyph & holo text ring
   L.misc.holoRing = put([], CA.add(2048, 160, (g) => {
     g.fillStyle = '#000'; g.fillRect(0, 0, 2048, 160);
-    const txt = '  ようこそ 港の夜へ  ◆  WELCOME  ◆  RIDE THE STORM  ◆  TSUBAME E-MOTO  ◆ ';
-    textCentered(g, txt, 1024, 80, FONTS.goth, 800, 2000, 110, '#ffffff');
+    const txt = ART_RESTYLE ? '  WELCOME TO SOLANO  ◆  RIDE THE STORM  ◆  TSUBAME E-MOTO  ◆  OPEN ALL NIGHT  ◆ '
+      : '  ようこそ 港の夜へ  ◆  WELCOME  ◆  RIDE THE STORM  ◆  TSUBAME E-MOTO  ◆ ';
+    textCentered(g, txt, 1024, 80, ART_RESTYLE ? FONTS.bahn : FONTS.goth, 800, 2000, 110, '#ffffff');
   }), 3);
 
   console.log(`[signage] atlas usage neon ${NA.packer.y + NA.packer.rowH}/${NA.S}px, colour ${CA.packer.y + CA.packer.rowH}/${CA.S}px`);

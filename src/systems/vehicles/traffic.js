@@ -1,6 +1,7 @@
 // Ground traffic (avenue, cross streets, expressway) with IDM car-following + traffic signals, and flying AV lanes.
 // Fully deterministic: seeded RNG for spawn, fixed dt in shot mode.
 import * as THREE from 'three/webgpu';
+import { BUS } from './bus.js';
 
 export function mulberry32(a) {
   return function () {
@@ -49,17 +50,26 @@ export class Traffic {
     const L = ctx.layout;
     const av = L.avenue, cs = L.crossStreets;
     const crossZs = cs.zs;
-    const offs = (z) => (-z / 60) * 3.0; // green wave offset
+    // green wave offset (restyle map: none - every intersection shows the same state as the signal heads, which are
+    //  driven by signalState() below in signage/street.js)
+    const offs = (z) => (L.plaza ? 0 : (-z / 60) * 3.0);
     const yA = 0;
-    // --- avenue lanes (Japanese LEFT-hand traffic, matches the expressway). northbound (-Z) at -x, southbound (+Z) at +x
+    // --- avenue lanes. Original map: Japanese LEFT-hand traffic, one lane each way (northbound (-Z) at -x).
+    //     Restyle map: RIGHT-hand traffic (Night City), two lanes each way beside the median (northbound at +x).
+    const RHT = !!L.plaza;
+    this.rightHand = RHT;
     const aStops = (sign) => crossZs.map((z) => ({ pos: z + sign * (cs.roadHalfWidth + 2.2), group: 'avenue', off: offs(z) }));
-    this.addLane({ kind: 'avenue', p0: new THREE.Vector3(-1.5, yA, av.zStart), dir: new THREE.Vector3(0, 0, -1), length: av.zStart - av.zEnd, v0: 12, stopsAt: aStops(1), axis: 'z' });
-    this.addLane({ kind: 'avenue', p0: new THREE.Vector3(1.5, yA, av.zEnd), dir: new THREE.Vector3(0, 0, 1), length: av.zStart - av.zEnd, v0: 12, stopsAt: aStops(-1), axis: 'z' });
-    // --- cross streets: eastbound (+X) at z-1.6, westbound at z+1.6
+    const laneXs = RHT ? [av.medianHalf + 0.3 + av.laneWidth * 0.5, av.medianHalf + 0.3 + av.laneWidth * 1.5] : [1.5];
+    laneXs.forEach((lx, li) => {
+      const nX = RHT ? lx : -lx, v0 = 12 + li * 1.5; // (outer lane a little faster)
+      this.addLane({ kind: 'avenue', p0: new THREE.Vector3(nX, yA, av.zStart), dir: new THREE.Vector3(0, 0, -1), length: av.zStart - av.zEnd, v0, stopsAt: aStops(1), axis: 'z' });
+      this.addLane({ kind: 'avenue', p0: new THREE.Vector3(-nX, yA, av.zEnd), dir: new THREE.Vector3(0, 0, 1), length: av.zStart - av.zEnd, v0, stopsAt: aStops(-1), axis: 'z' });
+    });
+    // --- cross streets: left-hand eastbound (+X) on the north side (z-), right-hand on the south side (z+)
     for (const z of crossZs) {
-      const hw = av.roadHalfWidth + 2.2;
-      this.addLane({ kind: 'cross', p0: new THREE.Vector3(cs.xStart, yA, z - 2.2), dir: new THREE.Vector3(1, 0, 0), length: cs.xEnd - cs.xStart, v0: 10, stopsAt: [{ pos: -hw, group: 'cross', off: offs(z) }], axis: 'x' });
-      this.addLane({ kind: 'cross', p0: new THREE.Vector3(cs.xEnd, yA, z + 2.2), dir: new THREE.Vector3(-1, 0, 0), length: cs.xEnd - cs.xStart, v0: 10, stopsAt: [{ pos: hw, group: 'cross', off: offs(z) }], axis: 'x' });
+      const hw = av.roadHalfWidth + 2.2, o = RHT ? 2.75 : -2.2;
+      this.addLane({ kind: 'cross', p0: new THREE.Vector3(cs.xStart, yA, z + o), dir: new THREE.Vector3(1, 0, 0), length: cs.xEnd - cs.xStart, v0: 10, stopsAt: [{ pos: -hw, group: 'cross', off: offs(z) }], axis: 'x' });
+      this.addLane({ kind: 'cross', p0: new THREE.Vector3(cs.xEnd, yA, z - o), dir: new THREE.Vector3(-1, 0, 0), length: cs.xEnd - cs.xStart, v0: 10, stopsAt: [{ pos: hw, group: 'cross', off: offs(z) }], axis: 'x' });
     }
     // --- expressway (elevated): use the landmarks lane list when present
     const ex = opts.expressway;
@@ -67,7 +77,8 @@ export class Traffic {
       const lanes = ex.lanes?.length ? ex.lanes : [{ z: ex.z - 5.25, dir: 1 }, { z: ex.z - 1.75, dir: 1 }, { z: ex.z + 1.75, dir: -1 }, { z: ex.z + 5.25, dir: -1 }];
       lanes.forEach((ln, i) => {
         const v0 = (ex.speedLimit || 22) * (i % 2 ? 1.12 : 0.92);
-        this.addLane({ kind: 'express', p0: new THREE.Vector3(ln.dir > 0 ? ex.xStart : ex.xEnd, ex.deckY, ln.z), dir: new THREE.Vector3(ln.dir, 0, 0), length: ex.xEnd - ex.xStart, v0, stopsAt: [], axis: 'x' });
+        const d = RHT ? -ln.dir : ln.dir; // (right-hand traffic flips each carriageway)
+        this.addLane({ kind: 'express', p0: new THREE.Vector3(d > 0 ? ex.xStart : ex.xEnd, ex.deckY, ln.z), dir: new THREE.Vector3(d, 0, 0), length: ex.xEnd - ex.xStart, v0, stopsAt: [], axis: 'x' });
       });
     }
     // --- populate
@@ -88,6 +99,32 @@ export class Traffic {
         lane.cars.push(car); this.cars.push(car);
         s += spacing * (0.6 + this.rng() * 1.1);
       }
+      this.placeLaneCars(lane);
+    }
+    // restyle map: a city bus per direction on the kerb lane, serving the bus shelters (vehicles/bus.js)
+    this.buses = [];
+    if (RHT && L.busShelters?.length) this.addBuses(L);
+  }
+
+  addBuses(L) {
+    const av = L.avenue;
+    for (const lane of this.lanes) {
+      if (lane.kind !== 'avenue' || Math.abs(lane.p0.x) < av.medianHalf + 0.3 + av.laneWidth) continue; // kerb lanes only
+      const side = Math.sign(lane.p0.x);
+      const stops = L.busShelters.filter((sh) => sh.side === side).map((sh) => (sh.z - lane.p0.z) / lane.dir.z)
+        .filter((s) => s > 0 && s < lane.length).sort((a, b) => a - b);
+      if (!stops.length) continue;
+      const s = (stops[0] + lane.length * 0.55) % lane.length;
+      const bus = {
+        type: 'bus', kind: 'bus', bus: true, paint: null, pos: new THREE.Vector3(), quat: new THREE.Quaternion(), light: new THREE.Vector3(1, 1, 0),
+        spin: 0, v: 8, v0: 11, s, len: BUS.len, radius: BUS.len * 0.6, position: null, speed: 0,
+        stops, served: 0, dwell: 0, doorOpen: false, lane,
+      };
+      // clear the cars spawned where the bus goes
+      const drop = new Set(lane.cars.filter((c) => Math.abs(c.s - s) < 14));
+      lane.cars = lane.cars.filter((c) => !drop.has(c));
+      this.cars = this.cars.filter((c) => !drop.has(c));
+      lane.cars.push(bus); this.buses.push(bus);
       this.placeLaneCars(lane);
     }
   }
@@ -121,18 +158,24 @@ export class Traffic {
   }
 
   // obstacles: array of Vector3 (player / driven car) that traffic must not run into
-  update(dt, t, obstacles) {
+  update(dt, t, obstacles, obsHW = null) {
     const tmp = this._tmp || (this._tmp = new THREE.Vector3());
     for (const lane of this.lanes) {
       const cars = lane.cars;
       cars.sort((a, b) => b.s - a.s);
       // obstacles projected onto this lane
       const obsS = [];
-      for (const o of obstacles) {
+      for (let k = 0; k < obstacles.length; k++) {
+        const o = obstacles[k];
         tmp.subVectors(o, lane.p0);
         const s = tmp.dot(lane.dir);
         const lat = tmp.addScaledVector(lane.dir, -s);
-        if (Math.abs(lat.x) + Math.abs(lat.z) < 2.0 && Math.abs(lat.y) < 3 && s > 0 && s < lane.length) obsS.push(s);
+        // (restyle map: the real lateral clearance - traffic collider half width 0.9 + the obstacle's half width - so a car
+        //  standing in the kerb parking strip / respray bay that clears the lane does not hold the traffic up)
+        //  (the widest vehicle on the lane - the bus - decides the lane prefilter; each car checks its own width below)
+        const latD = Math.abs(lat.x) + Math.abs(lat.z), hw = obsHW?.[k] ?? 0.9;
+        const thr = this.rightHand ? BUS.w / 2 + 0.02 + hw : 2.0;
+        if (latD < thr && Math.abs(lat.y) < 3 && s > 0 && s < lane.length) obsS.push(s, latD, hw);
       }
       for (let i = 0; i < cars.length; i++) {
         const c = cars[i];
@@ -147,9 +190,30 @@ export class Traffic {
           const stopDist = (c.v * c.v) / (2 * 4.0);
           if (sig === 'r' || (sig === 'y' && ds > stopDist + 1)) { if (ds < gap) { gap = Math.max(ds, 0.01); vLead = 0; } }
         }
-        for (const s of obsS) {
+        let obsMin = Infinity;
+        for (let k = 0; k < obsS.length; k += 3) {
+          const s = obsS[k];
+          if (this.rightHand && obsS[k + 1] >= (c.bus ? BUS.w / 2 + 0.02 : 0.92) + obsS[k + 2]) continue;
           const ds = s - c.s - c.len * 0.5 - 1.2;
           if (ds > -1 && ds < gap) { gap = Math.max(ds, 0.01); vLead = 0; }
+          if (ds > -1) obsMin = Math.min(obsMin, ds);
+        }
+        let hold = false;
+        if (c.bus) {
+          // bus stops: a virtual red light at each shelter until the bus has dwelt there (IDM settles s0 short of it)
+          c.doorOpen = false;
+          for (let k = 0; k < c.stops.length; k++) {
+            if (c.served & (1 << k)) continue;
+            const ds = c.stops[k] - c.s;
+            if (ds < -3 || ds > 70) continue;
+            if (ds < 0.9 && c.v < 0.4) {
+              c.dwell += dt; hold = true; // (standing still while it kneels and the doors are open)
+              c.doorOpen = c.dwell > 0.9 && c.dwell < BUS.dwell - 1.0;
+              if (c.dwell > BUS.dwell) { c.served |= 1 << k; c.dwell = 0; continue; }
+            }
+            const g = Math.max(ds + 2.2, 0.01);
+            if (g < gap) { gap = g; vLead = 0; }
+          }
         }
         // IDM
         const a = 2.2, b = 3.5, s0 = 2.2, T = 1.2;
@@ -158,10 +222,15 @@ export class Traffic {
         let acc = a * (1 - Math.pow(c.v / c.v0, 4) - Math.pow(sStar / Math.max(gap, 0.01), 2));
         acc = Math.max(acc, -9);
         c.v = Math.max(0, c.v + acc * dt);
-        c.s += c.v * dt;
+        let adv = c.v * dt;
+        // restyle map: never drive into someone who stepped out right in front (IDM alone cannot brake in time) -
+        // stop dead 1.2 m short of them instead of sliding the kinematic body into the player
+        if (this.rightHand && adv > obsMin) { adv = Math.max(0, obsMin); c.v = adv / dt; }
+        if (hold) { adv = 0; c.v = 0; }
+        c.s += adv;
         c.brake = acc < -0.8 || c.v < 0.3 ? 1 : 0;
-        if (c.s > lane.length) c.s -= lane.length;
-        c.spin -= (c.v * dt) / (this.models[c.type].wheelRadius || 0.33);
+        if (c.s > lane.length) { c.s -= lane.length; if (c.bus) c.served = 0; }
+        c.spin -= (c.v * dt) / ((c.bus ? BUS.wheelR : this.models[c.type].wheelRadius) || 0.33);
         c.light.set(1, 1, c.brake);
         c.speed = c.v;
       }

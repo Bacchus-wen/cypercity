@@ -12,6 +12,9 @@ import * as THREE from 'three/webgpu';
 import { loadModels } from './models.js';
 import { Fleet } from './fleet.js';
 import { Traffic, SkyTraffic, mulberry32, PALETTE } from './traffic.js';
+import { buildBuses, BUS } from './bus.js';
+import { sprayEnabled } from '../player/spray.js';
+import { tacoEnabled, tacoSpot } from '../player/taco.js';
 import { VehicleLights } from './lights.js';
 import { DrivenCar } from './drive.js';
 
@@ -44,7 +47,9 @@ export default {
     };
     const av = L.avenue, cs = L.crossStreets;
     const curbX = av.roadHalfWidth - 1.15;
-    for (const side of [-1, 1]) {
+    const HERO_NOSE_OUT = 0.2; // rad, hero parked in the bay angled toward the lane
+    const RHT = !!L.plaza; // restyle map: right-hand traffic, no kerbside parking on the boulevard
+    for (const side of RHT ? [] : [-1, 1]) {
       for (let z = av.zStart - 8; z > av.zEnd + 10; z -= 6.4 + rng() * 1.6) {
         if (cs.zs.some((zc) => Math.abs(z - zc) < cs.roadHalfWidth + 8)) continue;
         if (side < 0 && Math.abs(z - L.alley.z) < L.alley.width + 4) continue;
@@ -64,13 +69,24 @@ export default {
         for (let x = cs.xStart + 15; x < cs.xEnd - 10; x += 6.6 + rng() * 2) {
           if (Math.abs(x) < av.roadHalfWidth + av.sidewalkWidth + 8) continue;
           if (rng() > 0.4) continue;
-          addParked(rng() < 0.6 ? 'kei' : 'taxi', x, zc + side * (cs.roadHalfWidth - 0.92), side < 0 ? -Math.PI / 2 : Math.PI / 2);
+          const sp = sprayEnabled(L) && L.spray; // (keep the respray bay clear)
+          if (sp && Math.abs(zc + side * (cs.roadHalfWidth - 0.92) - sp.z) < 2 && Math.abs(x - sp.x) < sp.len / 2 + 3.5) continue;
+          const tk = tacoEnabled(L) && tacoSpot(L); // (and the taco truck's kerb)
+          if (tk && Math.abs(zc + side * (cs.roadHalfWidth - 0.92) - tk.z) < 2 && Math.abs(x - tk.x) < tk.len / 2 + 3.5) continue;
+          // (left-hand: north kerb faces -x; right-hand: north kerb faces +x... i.e. parked with the traffic of its side)
+          const yawC = side < 0 ? -Math.PI / 2 : Math.PI / 2;
+          addParked(rng() < 0.6 ? 'kei' : 'taxi', x, zc + side * (cs.roadHalfWidth - 0.92), RHT ? -yawC : yawC);
         }
       }
     }
     // hero: in shot mode drives up the avenue (ref panel 1); in play mode parked at the spawn kerb, ready to steal
-    const heroPos = ctx.isShot ? new THREE.Vector3(-1.4, 0, 16.4) : new THREE.Vector3(curbX, 0, 15);
-    this.hero = this.makeRecord('hero', ctx.isShot ? 'hero' : 'parked', heroPos, ctx.isShot ? 0 : 0, new THREE.Color(0x07070a));
+    const heroPos = RHT
+      ? (ctx.isShot ? new THREE.Vector3(av.medianHalf + 0.3 + av.laneWidth * 0.5, 0, 26)
+        : new THREE.Vector3(av.roadHalfWidth + (av.bay ? av.bay.depth * 0.5 : -1.15), 0, av.bay ? av.bay.z1 - 3 : 34)) // in the pull-in bay
+      : (ctx.isShot ? new THREE.Vector3(-1.4, 0, 16.4) : new THREE.Vector3(curbX, 0, 15));
+    this.heroStart = heroPos.clone();
+    // (restyle map: parked at the back of the bay, nosed out toward the lane so driving off clears the taper)
+    this.hero = this.makeRecord('hero', ctx.isShot ? 'hero' : 'parked', heroPos, ctx.isShot ? 0 : (RHT && av.bay ? HERO_NOSE_OUT : 0), new THREE.Color(0x07070a));
     this.hero.light.set(1, 1, 0);
     this.hero.hue = 0; // the player's car keeps its designed colours
     this.hero.solo = true;
@@ -104,6 +120,13 @@ export default {
       const c = world.createCollider(RAPIER.ColliderDesc.cuboid(0.9, 0.7, 2.2).setTranslation(0, 0.75, 0), b);
       this.kin.push({ b, c, type: null });
     }
+    // restyle map: city buses (procedural model + one kinematic box each)
+    this.busView = buildBuses(ctx.scene, this.traffic.buses);
+    this.busKin = this.traffic.buses.map((bus, i) => {
+      const b = world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(0, -200 - i * 8, 0));
+      world.createCollider(RAPIER.ColliderDesc.cuboid(BUS.w / 2, 1.45, BUS.len / 2 - 0.1).setTranslation(0, 1.6, 0), b);
+      return { b, bus };
+    });
 
     this.driven = null; this.loose = [];
     this.allGround = [...this.parked, ...this.traffic.cars];
@@ -115,6 +138,7 @@ export default {
       get traffic() { return self.traffic.cars; },
       get cars() { return self.allGround; },
       get flying() { return self.sky.cars; },
+      get buses() { return self.traffic.buses; },
       get hero() { return self.hero; },
       nearestCar: (pos) => self.nearestCar(pos),
       enter: (car) => self.enter(car),
@@ -201,26 +225,52 @@ export default {
         handbrake: i.down('Space'), boost: i.down('ShiftLeft') || i.down('ShiftRight'),
       } : { throttle: 0, steer: 0, handbrake: true, boost: false };
       if (playing && i.justPressed('KeyR')) this.driven.reset();
-      this.driven.step(dt, inp);
+      if (ctx.photoFreeze) {
+        // photo mode: pin the driven car exactly where it is (physics keeps stepping), restore its motion on exit
+        const b = this.driven.body, c = this.driven.car;
+        // (pin to the pose last shown - the body has already been stepped once more this frame)
+        if (!this._pin) this._pin = { t: { x: c.pos.x, y: c.pos.y, z: c.pos.z }, r: { x: c.quat.x, y: c.quat.y, z: c.quat.z, w: c.quat.w }, lv: b.linvel(), av: b.angvel() };
+        b.setTranslation(this._pin.t, true); b.setRotation(this._pin.r, true);
+        b.setLinvel({ x: 0, y: 0, z: 0 }, true); b.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      } else {
+        if (this._pin) { this.driven.body.setLinvel(this._pin.lv, true); this.driven.body.setAngvel(this._pin.av, true); this._pin = null; }
+        this.driven.step(dt, inp);
+      }
+    } else this._pin = null;
+    if (ctx.photoFreeze) {
+      // photo mode: cars you just left hold still too
+      for (const d of this.loose) {
+        const c = d.car, b = d.body;
+        if (!d._pin) d._pin = { lv: b.linvel(), av: b.angvel() };
+        b.setTranslation({ x: c.pos.x, y: c.pos.y, z: c.pos.z }, true); b.setRotation({ x: c.quat.x, y: c.quat.y, z: c.quat.z, w: c.quat.w }, true);
+        b.setLinvel({ x: 0, y: 0, z: 0 }, true); b.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      }
+    } else {
+      for (const d of this.loose) {
+        if (d._pin) { d.body.setLinvel(d._pin.lv, true); d.body.setAngvel(d._pin.av, true); d._pin = null; }
+        d.step(dt, { throttle: 0, steer: 0, handbrake: true, boost: false });
+      }
     }
-    for (const d of this.loose) d.step(dt, { throttle: 0, steer: 0, handbrake: true, boost: false });
     // hero car (shot mode): deterministic slow roll up the avenue, tail bar glowing
     if (this.hero.kind === 'hero') {
       const v = 2.2;
-      this.hero.pos.set(-1.4, 0, 16.4 - v * t);
+      this.hero.pos.set(this.heroStart.x, 0, this.heroStart.z - v * t);
       this.hero.spin = -(v * t) / this.models.hero.wheelRadius;
       this.hero.light.set(1, 1, 0.2);
     }
     // traffic + sky
     const obstacles = this._obs || (this._obs = []);
     obstacles.length = 0;
-    if (this.driven) obstacles.push(this.driven.car.pos);
-    for (const d of this.loose) obstacles.push(d.car.pos);
-    if (this.hero.kind === 'hero') obstacles.push(this.hero.pos);
+    // (half widths for the restyle's lateral clearance test: collider half width of the car, 0.35 for a pedestrian)
+    const obsHW = this._obsHW || (this._obsHW = []);
+    obsHW.length = 0;
+    if (this.driven) { obstacles.push(this.driven.car.pos); obsHW.push(this.driven.M.width * 0.46); }
+    for (const d of this.loose) { obstacles.push(d.car.pos); obsHW.push(d.M.width * 0.46); }
+    if (this.hero.kind === 'hero') { obstacles.push(this.hero.pos); obsHW.push(this.models.hero.width * 0.46); }
     const pp = ctx.api.player?.object?.position;
-    if (pp && ctx.api.player.mode === 'foot') obstacles.push(pp);
-    if (sdt > 0 && !this.dbgFreeze) this.traffic.update(sdt, t, obstacles);
-    this.sky.update(t);
+    if (pp && ctx.api.player.mode === 'foot') { obstacles.push(pp); obsHW.push(0.35); }
+    if (sdt > 0 && !this.dbgFreeze) this.traffic.update(sdt, t, obstacles, obsHW);
+    this.sky.update(t - (ctx.photoHold || 0)); // (flying cars hold still in photo mode: their time stops)
     // kinematic colliders follow the nearest traffic cars to the focus point
     const focus = this.driven ? this.driven.car.pos : (pp || ctx.camera.position);
     const near = this._near || (this._near = []);
@@ -232,12 +282,14 @@ export default {
       if (c) { K.b.setNextKinematicTranslation({ x: c.pos.x, y: c.pos.y, z: c.pos.z }); K.b.setNextKinematicRotation({ x: c.quat.x, y: c.quat.y, z: c.quat.z, w: c.quat.w }); }
       else K.b.setNextKinematicTranslation({ x: 0, y: -100 - k * 5, z: 0 });
     }
+    for (const { b, bus } of this.busKin) { b.setNextKinematicTranslation({ x: bus.pos.x, y: bus.pos.y, z: bus.pos.z }); b.setNextKinematicRotation({ x: bus.quat.x, y: bus.quat.y, z: bus.quat.z, w: bus.quat.w }); }
   },
 
   postUpdate(dt, t, ctx) {
     if (!this.fleet) return;
     const cam = ctx.camera;
     cam.updateMatrixWorld();
+    this.busView?.update(dt);
     const visible = this.fleet.update(this.all, cam);
     const spotCar = this.driven ? this.driven.car : (this.hero.kind === 'hero' ? this.hero : null);
     this.lights.update(visible, this.allGround, this.sky.cars, cam, spotCar);

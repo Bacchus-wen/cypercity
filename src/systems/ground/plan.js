@@ -20,7 +20,21 @@ export const G = {
   prom: { x0: PR.xMin, x1: PR.xMax, z0: PR.zEnd, z1: PR.zStart, y: PR.y },
   river: { x0: R.xCenter - R.halfWidth, x1: R.xCenter + R.halfWidth, water: R.waterLevel },
   world: { x0: -460, x1: 460, z0: -780, z1: 240 },
+  // restyle map: planted median (raised strip between intersections), lanes, central plaza (raised paving)
+  medHalf: A.medianHalf || 0,
+  laneW: A.laneWidth || 3,
+  lanes: A.lanes || 1,
+  plaza: LAYOUT.plaza || null,
 };
+// first lane edge (median curb + gutter); 0 without a median
+G.lane0 = G.medHalf > 0 ? G.medHalf + 0.3 : 0;
+// restyle map: pull-in bay cut into the east sidewalk (no parking lane on the boulevard)
+G.bay = A.bay ? { x0: G.avHalf, x1: G.avHalf + A.bay.depth, z0: A.bay.z0, z1: A.bay.z1, t: A.bay.taper } : null;
+export function inBay(x, z) {
+  const b = G.bay; if (!b || x < b.x0 - 0.01 || x > b.x1 || z < b.z0 - b.t || z > b.z1 + b.t) return false;
+  const k = z > b.z1 ? 1 - (z - b.z1) / b.t : z < b.z0 ? 1 - (b.z0 - z) / b.t : 1;
+  return x <= b.x0 + (b.x1 - b.x0) * k;
+}
 
 // Sidewalk "C" polygons for each avenue block side: avenue strip + arms along adjacent cross streets.
 // Returns [{ pts: [[x,z],...] (CCW in x/z), roundCorners: indices }]
@@ -38,7 +52,11 @@ export function sidewalkPolys() {
       const pts = []; const round = [];
       // walk: south-road corner -> north-road corner -> north arm -> inner -> south arm
       pts.push([xr, zHi]); if (southIsCross) round.push(0);
-      pts.push([xr, zLo]); if (northIsCross) round.push(1);
+      const B = G.bay;
+      if (side > 0 && B && B.z1 + B.t < zHi && B.z0 - B.t > zLo) { // notch for the pull-in bay (tapered ends)
+        pts.push([xr, B.z1 + B.t], [B.x1, B.z1], [B.x1, B.z0], [xr, B.z0 - B.t]);
+      }
+      pts.push([xr, zLo]); if (northIsCross) round.push(pts.length - 1);
       if (northIsCross) {
         pts.push([xEnd, zLo]);
         pts.push([xEnd, zLo - G.crSide]);
@@ -54,9 +72,27 @@ export function sidewalkPolys() {
         pts.push([xi, zHi]);
       }
       polys.push({ pts, round, side });
+      // median strip of this block, stopping short of the crosswalks (zebra spans 1-5 m from the cross street)
+      if (side === 1 && G.medHalf > 0) {
+        const z1 = southIsCross ? zHi - 6.5 : zHi, z0 = northIsCross ? zLo + 6.5 : zLo;
+        if (z1 - z0 > 4) {
+          const h = G.medHalf;
+          polys.push({ pts: [[h, z1], [h, z0], [-h, z0], [-h, z1]], round: [0, 1, 2, 3], r: Math.min(1.2, h * 0.9), side: 0, median: true });
+        }
+      }
     });
   }
+  // central plaza: one raised paved rect abutting the west sidewalk
+  if (G.plaza) {
+    const P = G.plaza, xi = -(G.avHalf + G.avSide);
+    polys.push({ pts: [[xi, P.z1], [xi, P.z0], [P.x0, P.z0], [P.x0, P.z1]], round: [2, 3], r: 2.5, side: -1, plaza: true });
+  }
   return polys;
+}
+export const inPlaza = (x, z) => !!G.plaza && x >= G.plaza.x0 && x <= -(G.avHalf + G.avSide) + 0.01 && z >= G.plaza.z0 && z <= G.plaza.z1;
+export function inMedian(x, z) {
+  if (!(G.medHalf > 0) || Math.abs(x) > G.medHalf || z > G.zS || z < G.zN) return false;
+  return G.crossZ.every((c) => Math.abs(z - c) > G.crHalf + 6.5);
 }
 
 // --- region tests (JS, for heightAt / placement) --------------------------------------------------------
@@ -72,10 +108,13 @@ export function curbDist(x, z) {
   let d = outside - r;
   // beyond the ends of the cross streets / avenue only the other road counts
   if (x < G.xW || x > G.xE) d = G.avHalf - Math.abs(x);
+  if (inMedian(x, z)) d = Math.min(d, Math.abs(x) - G.medHalf); // the median is curbed (negative = kerb side)
   return d;
 }
 
 export function inSidewalk(x, z) {
+  if (inPlaza(x, z) || inMedian(x, z)) return true;
+  if (inBay(x, z)) return false;
   if (z > G.zS || z < G.zN) return false;
   if (curbDist(x, z) > 0) return false;
   const ax = Math.abs(x);

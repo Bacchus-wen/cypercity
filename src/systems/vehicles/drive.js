@@ -114,6 +114,7 @@ export class DrivenCar {
     }
     // downforce + anti-flip assist
     const down = sp * sp * 0.9;
+    this.body.resetForces(true); // (addForce is persistent in Rapier: without the reset it piled up every step)
     this.body.addForce({ x: 0, y: -down, z: 0 }, true);
     const upv = _v2.set(0, 1, 0).applyQuaternion(car.quat);
     if (upv.y < 0.75) {

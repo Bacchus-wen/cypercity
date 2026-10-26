@@ -2,6 +2,7 @@
 // Cells (each CELL_W x CELL_H px, u across the lane, v = up = toward the intersection / direction of travel):
 //   0 止まれ   1 straight+left arrow   2 straight+right arrow   3 "40"   4 ◇ crosswalk-ahead diamond   5 バス専用
 import * as THREE from 'three/webgpu';
+import { ART_RESTYLE } from '../restyleArt.js';
 
 export const GLYPH = { STOP: 0, ARROW_L: 1, ARROW_R: 2, SPEED: 3, DIAMOND: 4, BUS: 5 };
 export const N_CELLS = 6;
@@ -43,12 +44,13 @@ export function buildMarkingAtlas() {
     });
   }
   // Japanese "止まれ" is written across the lane: one line, chars stretched along the road.
-  text(GLYPH.STOP, '止まれ', 92, 6.2);
+  // (restyle: English road text, ?art=legacy keeps the Japanese markings)
+  if (ART_RESTYLE) text(GLYPH.STOP, 'STOP', 150, 4.6); else text(GLYPH.STOP, '止まれ', 92, 6.2);
   text(GLYPH.SPEED, '40', 210, 2.9);
   // バス専用: two rows (バス nearest intersection (top), 専用 below) - drivers read top->bottom as they approach
   g.save();
-  text(GLYPH.BUS, 'バス', 120, 2.6, 0.27);
-  text(GLYPH.BUS, '専用', 120, 2.6, 0.75);
+  if (ART_RESTYLE) { text(GLYPH.BUS, 'BUS', 120, 2.6, 0.27); text(GLYPH.BUS, 'ONLY', 110, 2.6, 0.75); }
+  else { text(GLYPH.BUS, 'バス', 120, 2.6, 0.27); text(GLYPH.BUS, '専用', 120, 2.6, 0.75); }
   g.restore();
 
   // arrows: shaft from bottom to top, head at top; optional branch

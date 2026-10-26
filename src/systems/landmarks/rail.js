@@ -6,6 +6,7 @@ import {
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
 import { Batch, profileGeometry, beamBetween, cuboid, groundY, mulberry32, unitBox } from './util.js';
 import { surface, metal, emissiveMat, U } from './materials.js';
+import { ART_RESTYLE } from '../restyleArt.js';
 
 // Elevated commuter rail viaduct + catenary + animated trains.
 export function buildRail(ctx, tex, root) {
@@ -51,7 +52,8 @@ export function buildRail(ctx, tex, root) {
     if (x > river.xCenter - river.halfWidth - 20 && x < river.xCenter + river.halfWidth + 20) continue;
     pillarXs.push(x);
   }
-  pillarXs.push(-12.5, 12.5, river.xCenter - river.halfWidth - 15, river.xCenter, river.xCenter + river.halfWidth + 15);
+  // (restyle map: one central column on the boulevard median instead of a pair at the kerbs)
+  pillarXs.push(...(ctx.layout.avenue.medianHalf ? [0] : [-12.5, 12.5]), river.xCenter - river.halfWidth - 15, river.xCenter, river.xCenter + river.halfWidth + 15);
   const colGeo = new THREE.CylinderGeometry(1, 1, 1, 8, 1);
   colGeo.rotateY(Math.PI / 8);
   const capProf = [[-3.6, 0], [-3.6, -0.6], [-1.4, -2.0], [1.4, -2.0], [1.4, -2.0], [3.6, -0.6], [3.6, 0]];
@@ -278,11 +280,17 @@ function buildTrains(ctx, root, tracks, H) {
     // corrugated lower side
     const corr = sin(y.mul(60)).mul(0.5).add(0.5).mul(step(y, 1.45)).mul(side);
     let base = mix(steel.mul(mix(1, 0.85, corr)), stripeC, clamp(stripe.mul(side), 0, 1));
+    if (ART_RESTYLE) {
+      // restyle livery (Solano Metro): graphite body, wide signal-red belt under the windows, thin amber pinstripe
+      const belt = smoothstep(0.95, 0.98, y).mul(smoothstep(1.62, 1.59, y)).mul(side);
+      const pin = smoothstep(1.7, 1.72, y).mul(smoothstep(1.78, 1.76, y)).mul(side);
+      base = mix(mix(vec3(0.075, 0.078, 0.09), vec3(0.85, 0.08, 0.1), belt), vec3(1.0, 0.62, 0.15), pin);
+    }
     // roof darker grey
     const roof = smoothstep(3.3, 3.6, y);
     base = mix(base, vec3(0.18, 0.18, 0.2), roof);
     m.colorNode = mix(base, vec3(0.01), glassSide);
-    m.metalnessNode = mix(mix(float(0.85), float(0.2), roof), float(0), glassSide);
+    m.metalnessNode = mix(mix(float(ART_RESTYLE ? 0.3 : 0.85), float(0.2), roof), float(0), glassSide); // (restyle: painted body)
     m.roughnessNode = mix(float(0.3), float(0.05), glassSide);
     let emis = winEmit.mul(glassSide);
     if (isCab) {

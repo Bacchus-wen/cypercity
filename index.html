@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NEON KAIDO</title>
+  <title>DUSKLINE</title>
   <link rel="icon" href="data:," />
   <link rel="stylesheet" href="/src/ui/style.css" />
 </head>
@@ -11,6 +11,23 @@
   <div id="app"></div>
   <div id="hud"></div>
   <div id="loading"><div class="bar"><div class="fill"></div></div><div class="label">INITIALIZING</div></div>
+  <script>
+    // ?orig=1: the original game for side-by-side comparison (every restyle switch set to legacy before any module loads)
+    (function () {
+      var q = new URLSearchParams(location.search);
+      if (q.has('orig')) {
+        ['look', 'map', 'art', 'mass', 'skyline', 'crowd', 'cars', 'props', 'ui', 'audio'].forEach(function (k) { q.set(k, 'legacy'); });
+        q.delete('orig');
+        history.replaceState(null, '', location.pathname + '?' + q.toString() + location.hash);
+      }
+      if (q.get('ui') === 'legacy') document.documentElement.classList.add('ui-legacy');
+      // remembered time of day of the restyle (pause menu setting) when the URL does not choose one
+      try {
+        var tod = localStorage.getItem('duskline.tod');
+        if (tod && !q.has('tod') && !q.has('shot') && q.get('look') !== 'legacy') { q.set('tod', tod); history.replaceState(null, '', location.pathname + '?' + q.toString() + location.hash); }
+      } catch (e) { /* private mode */ }
+    })();
+  </script>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

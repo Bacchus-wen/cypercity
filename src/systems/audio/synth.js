@@ -826,6 +826,306 @@ function music() {
   return { channels: chs, loop: true };
 }
 
+// ------------------------------------------------------------------ MUSIC (restyle: DUSKLINE)
+// A dusk-drive synth-pop loop, deliberately unlike the original's slow rainy Dm9 pad: 104 BPM, A minor
+// (Am - F - C - G), four-on-the-floor kick, gated clap, 8th-note octave saw bass, side-chained pad, a plucked 16th
+// arpeggio from bar 5 and a pulse lead from bar 9 with ping-pong echoes. 16 bars, seamless (all events wrap).
+function music2() {
+  const rng = mulberry32(904);
+  const bpm = 104, beat = 60 / bpm, bar = beat * 4, bars = 16, Ls = bar * bars;
+  const n = N(Ls);
+  const L = new Float32Array(n), R = new Float32Array(n);
+  const both = (b, g, t, pan = 0) => { const [gl, gr] = panGains(pan); mixWrap(L, b, g * gl, N(t)); mixWrap(R, b, g * gr, N(t)); };
+  const CH = [ // per bar: bass root, pad voicing
+    { r: 33, pad: [57, 60, 64, 67] }, { r: 33, pad: [57, 60, 64, 67] }, { r: 29, pad: [53, 57, 60, 64] }, { r: 29, pad: [53, 57, 60, 64] },
+    { r: 36, pad: [55, 60, 64, 67] }, { r: 36, pad: [55, 60, 64, 67] }, { r: 31, pad: [55, 59, 62, 67] }, { r: 31, pad: [55, 59, 62, 66] },
+  ];
+  const chordAt = (b) => CH[b % 8];
+
+  // --- kick (every beat) + side-chain envelope
+  const duck = new Float32Array(n).fill(1);
+  for (let k = 0; k < bars * 4; k++) {
+    const t0 = k * beat, len = N(0.4), b = new Float32Array(len);
+    let ph = 0;
+    for (let i = 0; i < len; i++) {
+      const t = i / SR, f = 46 + 90 * Math.exp(-t / 0.035);
+      ph += f / SR;
+      b[i] = Math.sin(2 * Math.PI * ph) * Math.exp(-t / 0.2) + (i < 60 ? (rng() * 2 - 1) * 0.3 * (1 - i / 60) : 0);
+    }
+    both(b, 0.9, t0);
+    const s0 = N(t0), dl = N(beat);
+    for (let i = 0; i < dl; i++) duck[(s0 + i) % n] = Math.min(duck[(s0 + i) % n], 1 - 0.75 * Math.exp(-(i / SR) / 0.11));
+  }
+  // --- clap on 2 and 4 (three bursts + short gated tail)
+  for (let k = 0; k < bars * 4; k++) {
+    if (k % 2 === 0) continue;
+    const len = N(0.32), b = white(len, rng);
+    for (let i = 0; i < len; i++) {
+      const t = i / SR;
+      const burst = [0, 0.011, 0.023].reduce((a, o) => a + (t >= o ? Math.exp(-(t - o) / 0.006) : 0), 0);
+      b[i] *= burst * 0.6 + (t > 0.02 ? Math.exp(-(t - 0.02) / 0.09) * (t < 0.24 ? 1 : Math.max(0, 1 - (t - 0.24) / 0.04)) * 0.5 : 0);
+    }
+    chain(b, [['bandpass', 1400, 0.8], ['highpass', 500, 0.7]]);
+    both(b, 1.5, k * beat);
+  }
+  // --- hats: closed 8ths (off-beats louder), open hat on the last off-beat of each bar
+  for (let k = 0; k < bars * 8; k++) {
+    const open = k % 8 === 7, len = N(open ? 0.3 : 0.06), b = white(len, rng);
+    for (let i = 0; i < len; i++) b[i] *= Math.exp(-(i / SR) / (open ? 0.12 : 0.022));
+    chain(b, [['highpass', 7000, 0.7], ['peaking', 10000, 1, 4]]);
+    both(b, (k % 2 ? 0.42 : 0.22) * (open ? 0.8 : 1), k * beat / 2, k % 2 ? 0.25 : -0.2);
+  }
+  // --- bass: 8th-note octave saw through an enveloped low-pass
+  for (let k = 0; k < bars * 8; k++) {
+    const c = chordAt(Math.floor(k / 8));
+    const f = mtof(c.r + (k % 2 ? 12 : 0)), len = N(beat / 2 + 0.02), b = new Float32Array(len);
+    addSaw(b, f, 0.5, 0, len, 0); addSaw(b, f * 1.004, 0.35, 0, len, 0.3);
+    const bq = new Biquad('lowpass', 1600, 2.2);
+    for (let i = 0; i < len; i++) {
+      if ((i & 31) === 0) bq.set('lowpass', 260 + 1700 * Math.exp(-(i / SR) / 0.07), 2.2);
+      const t = i / SR, env = Math.min(1, t / 0.004) * (0.55 + 0.45 * Math.exp(-t / 0.09)) * (i > len - N(0.02) ? (len - i) / N(0.02) : 1);
+      b[i] = bq.tick(b[i]) * env;
+    }
+    both(b, 0.55, k * beat / 2);
+  }
+  // --- pad (detuned saws, warm low-pass), pumped by the side-chain
+  const padL = new Float32Array(n), padR = new Float32Array(n);
+  for (let bi = 0; bi < bars; bi++) {
+    const c = chordAt(bi), len = N(bar + 0.6);
+    for (const m of c.pad) {
+      for (const [det, side] of [[-9, 0], [7, 1], [-3, 1], [11, 0]]) {
+        const b = new Float32Array(len);
+        addSaw(b, mtof(m) * Math.pow(2, det / 1200), 0.05, 0, len, rng());
+        for (let i = 0; i < len; i++) { const t = i / SR; b[i] *= Math.min(1, t / 0.06) * (t > bar ? Math.max(0, 1 - (t - bar) / 0.6) : 1); }
+        mixWrap(side ? padR : padL, b, 1, N(bi * bar));
+      }
+    }
+  }
+  for (const p of [padL, padR]) {
+    chainPeriodic(p, [['lowpass', 1500, 0.9], ['highpass', 140, 0.7]]);
+    for (let i = 0; i < n; i++) p[i] *= duck[i];
+  }
+  mix(L, padL, 0.9); mix(R, padR, 0.9);
+  // --- plucked 16th arpeggio (bars 5-16)
+  const arp = [0, 1, 2, 3, 2, 1, 2, 3];
+  for (let k = 4 * 16; k < bars * 16; k++) {
+    const c = chordAt(Math.floor(k / 16)), m = c.pad[arp[k % 8]] + 12;
+    const len = N(0.22), b = new Float32Array(len), f = mtof(m);
+    addSaw(b, f, 0.4, 0, len, 0);
+    const bq = new Biquad('lowpass', 3000, 1.4);
+    for (let i = 0; i < len; i++) {
+      if ((i & 31) === 0) bq.set('lowpass', 600 + 4200 * Math.exp(-(i / SR) / 0.03), 1.4);
+      b[i] = bq.tick(b[i]) * Math.exp(-(i / SR) / 0.09);
+    }
+    both(b, (k >= 8 * 16 ? 0.12 : 0.18) * (k % 4 === 0 ? 1 : 0.75), k * beat / 4, k % 2 ? 0.45 : -0.45);
+  }
+  // --- pulse lead (bars 9-16) with ping-pong echoes (dotted 8th)
+  const MEL = [ // [midi | 0 rest, eighths] per bar
+    [[76, 2], [74, 1], [72, 1], [74, 2], [76, 2]], [[69, 3], [72, 1], [76, 2], [79, 2]], [[81, 2], [79, 1], [76, 1], [79, 4]], [[77, 2], [76, 2], [74, 2], [72, 2]],
+    [[76, 2], [79, 2], [84, 3], [83, 1]], [[81, 2], [79, 2], [76, 4]], [[74, 2], [76, 1], [79, 1], [81, 2], [83, 2]], [[86, 4], [83, 2], [79, 2]],
+  ];
+  MEL.forEach((barNotes, bj) => {
+    let e = 0;
+    for (const [m, d] of barNotes) {
+      const t0 = (8 + bj) * bar + e * beat / 2;
+      e += d;
+      if (!m) continue;
+      const dur = d * beat / 2, len = N(dur + 0.08), b = new Float32Array(len), f = mtof(m);
+      let p1 = 0, p2 = 0.5;
+      for (let i = 0; i < len; i++) {
+        const t = i / SR, vib = 1 + 0.004 * Math.sin(2 * Math.PI * 5.5 * t) * Math.min(1, t / 0.25);
+        p1 = (p1 + f * vib / SR) % 1; p2 = (p2 + f * 1.003 * vib / SR) % 1;
+        const pulse = (p1 < 0.38 ? 1 : -1) * 0.6 + (2 * p2 - 1) * 0.4;
+        b[i] = pulse * Math.min(1, t / 0.01) * (t > dur ? Math.max(0, 1 - (t - dur) / 0.08) : 0.85 + 0.15 * Math.exp(-t / 0.1));
+      }
+      chain(b, [['lowpass', 4200, 0.8], ['highpass', 220, 0.7]]);
+      both(b, 0.16, t0);
+      for (let r = 1; r <= 3; r++) mixWrap(r % 2 ? R : L, b, 0.16 * Math.pow(0.42, r), N(t0 + r * beat * 0.75));
+    }
+  });
+  const chs = [L, R].map((c) => chainPeriodic(c, [['highpass', 28, 0.7], ['lowpass', 14000, 0.7]]));
+  normalizeRms(chs, LOOP_RMS);
+  return { channels: chs, loop: true };
+}
+
+// ------------------------------------------------------------------ CANAL (restyle)
+// Water lapping against the canal walls: low brown noise with a slow periodic swell + small plinks (seamless 9 s).
+function waterLap() {
+  const rng = mulberry32(911);
+  const n = N(9);
+  const chs = [0, 1].map(() => {
+    const b = chainPeriodic(brown(n, rng, 0.995), [['lowpass', 700, 0.7], ['highpass', 60, 0.7]]);
+    const sw = smoothRandomLoop(n, rng, 0.9);
+    for (let i = 0; i < n; i++) b[i] *= 0.55 + 0.45 * Math.max(-1, Math.min(1, sw[i] * 1.6)) + 0.25 * Math.sin((2 * Math.PI * i) / N(3));
+    for (let k = 0; k < 26; k++) {
+      const bb = bubble(rr(rng, 500, 1400), rr(rng, 0.008, 0.02), rr(rng, 0.3, 1.2));
+      mixWrap(b, bb, rr(rng, 0.02, 0.06), Math.floor(rng() * n));
+    }
+    return b;
+  });
+  normalizeRms(chs, LOOP_RMS);
+  return { channels: chs, loop: true };
+}
+// Gull calls for the harbour canal: two-to-four rising/falling "kyow" syllables (harmonic glide + breath noise).
+function gull(seed) {
+  const rng = mulberry32(seed);
+  const calls = 2 + Math.floor(rng() * 3), gap = rr(rng, 0.22, 0.34);
+  const n = N(calls * gap + 0.5), b = new Float32Array(n);
+  for (let c = 0; c < calls; c++) {
+    const len = N(rr(rng, 0.16, 0.26)), s0 = N(c * gap + rr(rng, 0, 0.03)), f0 = rr(rng, 1500, 2100);
+    let ph = 0;
+    for (let i = 0; i < len && s0 + i < n; i++) {
+      const t = i / len, f = f0 * (1 + 0.35 * Math.sin(Math.PI * t) - 0.25 * t);
+      ph += f / SR;
+      const env = Math.sin(Math.PI * Math.min(1, t * 1.15)) ** 1.4;
+      b[s0 + i] += (Math.sin(2 * Math.PI * ph) * 0.6 + Math.sin(4 * Math.PI * ph + 0.4) * 0.3 + Math.sin(6 * Math.PI * ph) * 0.12 + (rng() * 2 - 1) * 0.15) * env;
+    }
+  }
+  chain(b, [['bandpass', 2200, 0.7], ['highpass', 700, 0.7]]);
+  fades(b, 0.005, 0.05);
+  normalizePeak([b], 0.8);
+  return { channels: [b, Float32Array.from(b)], loop: false };
+}
+
+// Plaza busker (restyle): fingerpicked nylon-ish guitar, Karplus-Strong plucks, Am - F - C - G at 90 BPM (8 bars).
+function busker() {
+  const rng = mulberry32(951);
+  const beat = 60 / 90, bar = beat * 4, n = N(bar * 8);
+  const L = new Float32Array(n), R = new Float32Array(n);
+  const chords = [[45, 52, 57, 60, 64], [41, 48, 53, 57, 60], [48, 52, 55, 60, 64], [43, 50, 55, 59, 62]]; // Am F C G
+  const pluck = (f, dur, amp, bright) => {
+    const len = N(dur), P = Math.max(2, Math.round(SR / f)), buf = new Float32Array(P), out = new Float32Array(len);
+    for (let i = 0; i < P; i++) buf[i] = (rng() * 2 - 1) * (0.6 + 0.4 * bright);
+    let idx = 0, prev = 0;
+    for (let i = 0; i < len; i++) {
+      const cur = buf[idx];
+      const nx = 0.5 * (cur + prev) * 0.996;
+      prev = cur; buf[idx] = nx; idx = (idx + 1) % P;
+      out[i] = cur * amp * Math.min(1, i / 40);
+    }
+    return out;
+  };
+  const pat = [0, 2, 3, 2, 4, 2, 3, 2]; // bass, then the treble strings in eighths
+  for (let b = 0; b < 8; b++) {
+    const c = chords[Math.floor(b / 2) % 4];
+    for (let k = 0; k < 8; k++) {
+      const m = c[pat[k]] + (k === 0 ? 0 : 0), f = mtof(m);
+      const t0 = b * bar + k * beat / 2 + (rng() - 0.5) * 0.012;
+      const p = pluck(f, k === 0 ? 2.4 : 1.4, k === 0 ? 0.5 : 0.28 + rng() * 0.08, k === 0 ? 0.3 : 0.7);
+      const pan = (pat[k] - 2) * 0.15;
+      const [gl, gr] = panGains(pan);
+      mixWrap(L, p, gl, N(t0)); mixWrap(R, p, gr, N(t0));
+    }
+  }
+  const chs = [L, R].map((c) => chainPeriodic(c, [['highpass', 70, 0.7], ['lowpass', 5200, 0.7], ['peaking', 220, 1.0, 2]]));
+  normalizeRms(chs, LOOP_RMS);
+  return { channels: chs, loop: true };
+}
+
+// City bus (restyle): air-suspension kneel hiss - a sharp valve "pssh" that decays into a softer sigh (mono, positional)
+function busHiss() {
+  const rng = mulberry32(961);
+  const n = N(1.5), b = white(n, rng);
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    b[i] *= (Math.min(1, t / 0.012) * (0.75 * Math.exp(-t / 0.18) + 0.3 * Math.exp(-t / 0.7))) * (1 + 0.15 * Math.sin(2 * Math.PI * 31 * t));
+  }
+  chain(b, [['highpass', 1800, 0.7], ['peaking', 4200, 1.2, 4], ['lowpass', 11000, 0.7]]);
+  fades(b, 0.002, 0.2);
+  normalizePeak([b], 0.85);
+  return { channels: [b], loop: false };
+}
+// City bus door chime (restyle): two soft falling bell tones (E6 - C6), the transit "doors opening" cue
+function busChime() {
+  const n = N(1.3), b = new Float32Array(n);
+  [[88, 0], [84, 0.28]].forEach(([m, t0]) => {
+    const f = mtof(m), s0 = N(t0);
+    for (let i = 0; s0 + i < n; i++) {
+      const t = i / SR, env = Math.min(1, t / 0.004) * Math.exp(-t / 0.35);
+      b[s0 + i] += env * (Math.sin(2 * Math.PI * f * t) + 0.35 * Math.sin(2 * Math.PI * f * 2.01 * t) * Math.exp(-t / 0.12) + 0.12 * Math.sin(2 * Math.PI * f * 3.0 * t));
+    }
+  });
+  chain(b, [['lowpass', 7000, 0.7]]);
+  fades(b, 0.001, 0.1);
+  normalizePeak([b], 0.6);
+  return { channels: [b], loop: false };
+}
+
+// Pigeon take-off (restyle): a clatter of wing claps - dozens of short low-mid noise slaps, dense at first, thinning out
+function flutter() {
+  const rng = mulberry32(971);
+  const n = N(1.6), b = new Float32Array(n);
+  for (let k = 0; k < 70; k++) {
+    const t0 = Math.pow(rng(), 1.8) * 1.3, len = N(rr(rng, 0.012, 0.03)), s0 = N(t0), amp = (1 - t0 / 1.4) * rr(rng, 0.4, 1);
+    for (let i = 0; i < len && s0 + i < n; i++) b[s0 + i] += (rng() * 2 - 1) * amp * Math.sin(Math.PI * i / len);
+  }
+  chain(b, [['bandpass', 900, 0.6], ['highpass', 180, 0.7]]);
+  fades(b, 0.002, 0.15);
+  normalizePeak([b], 0.8);
+  return { channels: [b], loop: false };
+}
+
+// Second radio station (restyle, CANAL WAVE 88.7): lo-fi chillhop at 84 BPM, swung - dusty kick and snare, soft hats,
+// electric-piano 9th chords (Fmaj9 Em9 Dm9 Cmaj9), round sub bass, vinyl crackle and a slow tape wobble. 8 bars.
+function music3() {
+  const rng = mulberry32(905);
+  const bpm = 84, beat = 60 / bpm, bar = beat * 4, bars = 8, n = N(bar * bars);
+  const L = new Float32Array(n), R = new Float32Array(n);
+  const both = (b, g, t, pan = 0) => { const [gl, gr] = panGains(pan); mixWrap(L, b, g * gl, N(t)); mixWrap(R, b, g * gr, N(t)); };
+  const sw = (k8) => k8 * beat / 2 + (k8 % 2 ? beat * 0.09 : 0); // swung 8ths
+  const CH = [[41, [57, 60, 64, 67]], [40, [55, 59, 62, 66]], [38, [53, 57, 60, 64]], [36, [52, 55, 59, 62]]];
+  // drums: kick on 1 and the "and" of 2, snare on 2 and 4, hats on swung 8ths
+  for (let b = 0; b < bars; b++) {
+    for (const k8 of [0, 3, 5]) {
+      if (k8 === 5 && b % 2 === 0) continue;
+      const len = N(0.35), kb = new Float32Array(len); let ph = 0;
+      for (let i = 0; i < len; i++) { const t = i / SR, f = 50 + 70 * Math.exp(-t / 0.03); ph += f / SR; kb[i] = Math.sin(2 * Math.PI * ph) * Math.exp(-t / 0.16); }
+      chain(kb, [['lowpass', 2500, 0.7]]);
+      both(kb, 0.85, b * bar + sw(k8));
+    }
+    for (const q of [1, 3]) {
+      const len = N(0.25), sb = white(len, rng);
+      for (let i = 0; i < len; i++) { const t = i / SR; sb[i] = sb[i] * Math.exp(-t / 0.07) * 0.8 + Math.sin(2 * Math.PI * 190 * t) * Math.exp(-t / 0.04) * 0.6; }
+      chain(sb, [['bandpass', 1800, 0.6], ['lowpass', 6000, 0.7]]);
+      both(sb, 0.7, b * bar + q * beat + 0.01);
+    }
+    for (let k8 = 0; k8 < 8; k8++) {
+      const len = N(0.05), hb = white(len, rng);
+      for (let i = 0; i < len; i++) hb[i] *= Math.exp(-(i / SR) / 0.015);
+      chain(hb, [['highpass', 6500, 0.7], ['lowpass', 11000, 0.7]]);
+      both(hb, k8 % 2 ? 0.18 : 0.12, b * bar + sw(k8), 0.3);
+    }
+  }
+  // electric piano: FM bell-ish sine pairs, chord on 1 and a re-strike on the swung "and" of 3
+  const ep = (m, dur, amp) => {
+    const len = N(dur + 0.6), b = new Float32Array(len), f = mtof(m);
+    for (let i = 0; i < len; i++) {
+      const t = i / SR, env = Math.min(1, t / 0.005) * Math.exp(-t / (dur * 0.9)) * (t > dur ? Math.exp(-(t - dur) / 0.12) : 1);
+      const mod = Math.sin(2 * Math.PI * f * t) * 1.2 * Math.exp(-t / 0.25);
+      b[i] = (Math.sin(2 * Math.PI * f * t + mod) * 0.8 + Math.sin(2 * Math.PI * f * 2 * t) * 0.12 * Math.exp(-t / 0.4)) * env * amp;
+    }
+    return b;
+  };
+  for (let b = 0; b < bars; b++) {
+    const [root, pad] = CH[b % 4];
+    for (const [t0, d, a] of [[0, bar * 0.6, 0.11], [sw(5), bar * 0.35, 0.07]]) pad.forEach((m, j) => both(ep(m, d, a), 1, b * bar + t0 + j * 0.012, (j - 1.5) * 0.25));
+    // sub bass: root on 1, fifth pickup on the swung "and" of 4
+    for (const [t0, m, d] of [[0, root, beat * 2.6], [sw(7), root + 7, beat * 0.4]]) {
+      const len = N(d), bb = new Float32Array(len), f = mtof(m);
+      for (let i = 0; i < len; i++) { const t = i / SR; bb[i] = (Math.sin(2 * Math.PI * f * t) + 0.25 * Math.sin(4 * Math.PI * f * t)) * Math.min(1, t / 0.01) * Math.min(1, (len - i) / N(0.03)) * 0.5; }
+      both(bb, 0.8, b * bar + t0);
+    }
+  }
+  // vinyl crackle + hiss
+  for (let k = 0; k < 260; k++) { const c = noiseClick(rng, 0.0015, rr(rng, 0.0002, 0.0008)); mixWrap(rng() < 0.5 ? L : R, c, rr(rng, 0.04, 0.16), Math.floor(rng() * n)); }
+  const hiss = chainPeriodic(pinkLoop(n, rng), [['highpass', 3000, 0.7], ['lowpass', 9000, 0.7]]);
+  mix(L, hiss, 0.012); mix(R, hiss, 0.012);
+  // dusty top end
+  const chs = [L, R].map((c) => chainPeriodic(c, [['highpass', 35, 0.7], ['lowpass', 7500, 0.7]]));
+  normalizeRms(chs, LOOP_RMS);
+  return { channels: chs, loop: true };
+}
+
 // ------------------------------------------------------------------ REGISTRY
 // Order = generation order (most important first, so the soundscape comes alive quickly).
 export const RECIPES = {
@@ -841,7 +1141,9 @@ export const RECIPES = {
   engineLow: () => engine(701, false), engineHigh: () => engine(702, true), tireHiss,
   sirenWail, sirenHiLo, horn0: () => horn(801, false), horn1: () => horn(802, true), horn2: () => horn(803, false),
   trainRumble, neonZap, wind, crowdBabble, ramenShop,
-  music,
+  music, music2,
+  waterLap, gull0: () => gull(921), gull1: () => gull(922), gull2: () => gull(923),
+  busker, busHiss, busChime, flutter, music3,
 };
 export const ORDER = Object.keys(RECIPES);
 

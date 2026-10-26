@@ -4,6 +4,7 @@
 import * as THREE from 'three/webgpu';
 import { uniform } from 'three/tsl';
 import { buildMaterialSet, PAINT_MATS, LIGHT_MATS, TEX_MATS } from './materials.js';
+import { ART_RESTYLE } from '../restyleArt.js';
 
 const _m = new THREE.Matrix4(), _w = new THREE.Matrix4(), _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion();
 const _v = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1), _c = new THREE.Color();
@@ -11,11 +12,19 @@ const _sphere = new THREE.Sphere(), _frustum = new THREE.Frustum(), _pm = new TH
 const AX = new THREE.Vector3(1, 0, 0), AY = new THREE.Vector3(0, 1, 0);
 // colour variants for textured cars (radians, applied to saturated texels); about a third keep the designed colours
 const CAR_HUES = [0, 0, 0, 2.1, -2.1, 1.05, -1.05, 3.14, 0.55, -0.55];
+// restyle (DUSKLINE): the city's cabs keep their designed yellow (7 in 8); private cars lean to the red / amber /
+// teal palette of the district instead of the full colour wheel
+const CAR_HUES_R = { taxi: [0, 0, 0, 0, 0, 0, 0, 3.14], other: [0, 0, 0, 0.55, -0.55, 3.14, 2.6, -0.3, 0, 0.3] };
+let _hueSeq = 0;
 export function carHue(c) {
   if (c.hue != null) return c.hue;
   const p = c.paint || _c.setRGB(0, 0, 0);
-  const h = Math.imul(Math.round(p.r * 255) * 73856093 ^ Math.round(p.g * 255) * 19349663 ^ Math.round(p.b * 255) * 83492791 ^ (c.id ?? 0), 2654435761) >>> 0;
-  return (c.hue = CAR_HUES[h % CAR_HUES.length]);
+  // (most cars carry no id, so the original hash only sees the paint: every car of a one-colour palette got the same
+  //  hue. The restyle adds a running counter so a fleet of one model still varies.)
+  const id = c.id ?? (ART_RESTYLE ? ++_hueSeq : 0);
+  const h = Math.imul(Math.round(p.r * 255) * 73856093 ^ Math.round(p.g * 255) * 19349663 ^ Math.round(p.b * 255) * 83492791 ^ id, 2654435761) >>> 0;
+  const T = ART_RESTYLE ? (c.type === 'taxi' ? CAR_HUES_R.taxi : CAR_HUES_R.other) : CAR_HUES;
+  return (c.hue = T[h % T.length]);
 }
 
 export class Fleet {

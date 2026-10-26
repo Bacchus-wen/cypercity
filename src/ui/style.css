@@ -6,3 +6,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-f
 #loading .fill { height: 100%; width: 0; background: #f3e600; box-shadow: 0 0 12px #f3e600; transition: width .2s; }
 #loading.done { opacity: 0; pointer-events: none; }
 body.shot #hud, body.shot #loading { display: none !important; }
+
+/* ===================== LOADING (DUSKLINE restyle unless ?ui=legacy) ===================== */
+html:not(.ui-legacy) #loading { background: #0d0b10; color: #f2ede4; font: 900 14px/1 'Avenir Next Condensed', 'DIN Condensed', 'Arial Narrow', sans-serif; letter-spacing: .4em; }
+html:not(.ui-legacy) #loading::before { content: 'DUSKLINE'; font: 900 italic 64px/1 'Avenir Next Condensed', 'DIN Condensed', 'Arial Narrow', Impact, sans-serif; letter-spacing: 0; color: #f2ede4; text-shadow: 5px 5px 0 #ff2d3d; margin-bottom: 26px; }
+html:not(.ui-legacy) #loading .bar { width: 360px; height: 8px; background: #2a252c; transform: skewX(-20deg); }
+html:not(.ui-legacy) #loading .fill { background: #ff2d3d; box-shadow: none; }
+

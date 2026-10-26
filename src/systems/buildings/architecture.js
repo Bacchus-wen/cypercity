@@ -1,6 +1,7 @@
 // Architecture: lot -> volumes -> facade quads (procedural windows in shader), roofs, parapets, trims.
 import { STYLES, MASS } from './plan.js';
 import { mulberry32 } from './rng.js';
+import { ART_RESTYLE } from '../restyleArt.js';
 
 export const FACADE_ATTRS = { aWin: [0, 3.2, 3, 4], aWin2: [0.5, 0.5, 0.3, 5], aWin3: [100, 1, 4, 0] };
 export const DETAIL_ATTRS = { aCol: [1, 1, 1, 0], aPbr: [0.6, 0, 0, 0.5] };
@@ -209,6 +210,7 @@ export function buildLotArchitecture(lot, B, out) {
       fac.box((mx0 + mx1) / 2, v.y1 + mh / 2, (mz0 + mz1) / 2, mx1 - mx0, mh, mz1 - mz0, { aWin: [seed + 0.5, mh, 4, v.y1], aWin2: [0.3, 0.3, 0.1, 3], aWin3: [v.y1 + mh - 0.3, trimLayer, 3, tint] });
       fac.box((mx0 + mx1) / 2, v.y1 + mh + 0.1, (mz0 + mz1) / 2, mx1 - mx0 + 0.3, 0.2, mz1 - mz0 + 0.3, ta);
       out.colliders.push({ x: (mx0 + mx1) / 2, y: v.y1 + mh / 2, z: (mz0 + mz1) / 2, hx: (mx1 - mx0) / 2, hy: mh / 2, hz: (mz1 - mz0) / 2 });
+      (lot.roofRects ||= []).push([mx0 - 0.2, mz0 - 0.2, mx1 + 0.2, mz1 + 0.2]);
     }
     if (rng.chance(0.35)) {
       const col = rng.pick([[0.6, 0.85, 1.0], [1.0, 0.3, 0.7], [0.3, 1.0, 0.9], [1.0, 0.8, 0.5]]);
@@ -219,7 +221,8 @@ export function buildLotArchitecture(lot, B, out) {
       det.box(v.x0 - 0.03, y, (v.z0 + v.z1) / 2, 0.06, t, d, a);
       det.box(v.x1 + 0.03, y, (v.z0 + v.z1) / 2, 0.06, t, d, a);
     }
-    if (lot.h > 45) for (const [x, z] of [[v.x0 + 0.3, v.z0 + 0.3], [v.x1 - 0.3, v.z1 - 0.3], [v.x0 + 0.3, v.z1 - 0.3], [v.x1 - 0.3, v.z0 + 0.3]]) {
+    // (restyle: rooftops2.js puts blinking beacons on masts instead of these static cubes)
+    if (lot.h > 45 && !ART_RESTYLE) for (const [x, z] of [[v.x0 + 0.3, v.z0 + 0.3], [v.x1 - 0.3, v.z1 - 0.3], [v.x0 + 0.3, v.z1 - 0.3], [v.x1 - 0.3, v.z0 + 0.3]]) {
       det.box(x, v.y1 + 1.3, z, 0.15, 0.15, 0.15, { aCol: [1, 0.08, 0.04, 6], aPbr: [0.5, 0, 0, 0] });
     }
   }

@@ -68,8 +68,13 @@ export class Batch {
       const va = typeof a === 'function' ? a(i) : a;
       this._push(_v, _n, U ? [U.getX(i), U.getY(i)] : [0, 0], va);
     }
-    if (geom.index) for (let i = 0; i < geom.index.count; i++) this.idx.push(base + geom.index.getX(i));
-    else for (let i = 0; i < P.count; i++) this.idx.push(base + i);
+    // mirrored transforms (negative determinant) flip the triangle winding back so faces stay front-facing
+    const flip = matrix.determinant() < 0;
+    const I = geom.index, cnt = I ? I.count : P.count, at = (i) => (I ? I.getX(i) : i);
+    for (let i = 0; i + 2 < cnt; i += 3) {
+      if (flip) this.idx.push(base + at(i), base + at(i + 2), base + at(i + 1));
+      else this.idx.push(base + at(i), base + at(i + 1), base + at(i + 2));
+    }
   }
 
   build() {

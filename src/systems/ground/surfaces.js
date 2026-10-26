@@ -46,14 +46,19 @@ export function sidewalkMaterial(T) {
   let porosity = mix(float(0.65), float(0.9), jointT);
 
   // --- tactile paving (yellow guide line + warning dots at crossings)
-  const lineAv = B(ax.greaterThan(7.8).and(ax.lessThan(8.1))).mul(onAv).mul(B(adz.greaterThan(G.crHalf + 0.3)));
-  const lineCr = B(adz.greaterThan(6.6).and(adz.lessThan(6.9)).and(ax.greaterThan(G.avHalf + G.avSide)));
-  const dotsAv = B(ax.greaterThan(6.2).and(ax.lessThan(6.8)).and(adz.greaterThan(6.2)).and(adz.lessThan(9.8)));
-  const dotsCr = B(ax.greaterThan(7.2).and(ax.lessThan(10.8)).and(adz.greaterThan(5.2)).and(adz.lessThan(5.8)));
+  // (positions relative to the road edges, so they follow the map's road widths; legacy values unchanged)
+  const AH = G.avHalf, CH = G.crHalf;
+  // (restyle map: no continuous yellow guide line along the sidewalks - a Japanese-street signature; the warning
+  //  dot pads at the crossings stay, like US truncated-dome kerb ramps)
+  const GUIDE = G.medHalf > 0 ? 0 : 1;
+  const lineAv = B(ax.greaterThan(AH + 1.8).and(ax.lessThan(AH + 2.1))).mul(onAv).mul(B(adz.greaterThan(CH + 0.3))).mul(GUIDE);
+  const lineCr = B(adz.greaterThan(CH + 1.6).and(adz.lessThan(CH + 1.9)).and(ax.greaterThan(AH + G.avSide))).mul(GUIDE);
+  const dotsAv = B(ax.greaterThan(AH + 0.2).and(ax.lessThan(AH + 0.8)).and(adz.greaterThan(CH + 1.2)).and(adz.lessThan(CH + 4.8)));
+  const dotsCr = B(ax.greaterThan(AH + 1.2).and(ax.lessThan(AH + 4.8)).and(adz.greaterThan(CH + 0.2)).and(adz.lessThan(CH + 0.8)));
   const dots = max(dotsAv, dotsCr);
   const tact = max(max(lineAv, lineCr), dots).toVar();
   // tactile local coords (bars run along the walking direction)
-  const tlAv = vec2(ax.sub(7.8).div(0.3), fract(z.div(0.3)));
+  const tlAv = vec2(ax.sub(AH + 1.8).div(0.3), fract(z.div(0.3)));
   const tlCr = vec2(adz.sub(6.6).div(0.3), fract(x.div(0.3)));
   const tlD = vec2(fract(x.div(0.3)), fract(z.div(0.3)));
   const tl = select(dots.greaterThan(0.5), tlD, select(lineAv.greaterThan(0.5), tlAv, tlCr));
@@ -155,6 +160,47 @@ export function promenadeMaterial(T) {
   const level = fbm(P.mul(0.3).add(6.0), 3).add(sunk).add(joint.mul(0.25)).sub(coping.mul(0.3));
   const puddle = smoothstep(0.7, 0.72, level).add(joint.mul(0.5)).min(1);
   const L = wetLayer({ albedo, roughness: rough, nxy, porosity: 0.6, puddle, ripple: rainRipples(P), filmRipple: 0.12, film: [0.3, 0.05] });
+  m.colorNode = L.albedo;
+  m.roughnessNode = clamp(L.roughness, 0.015, 1);
+  m.metalnessNode = float(0);
+  m.normalNode = upNormalToView(L.nxy);
+  return m;
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Plaza (restyle map): large granite slabs on a grid centred on the monument, a dark band every fourth row and
+// column, two dark concentric rings around the pool. Selections use step/mix only.
+export function plazaMaterial(T) {
+  const m = new THREE.MeshStandardNodeMaterial({ name: 'ground.plaza' });
+  const Pz = G.plaza;
+  const cx = (Pz.x0 + Pz.x1) / 2 + 4, cz = (Pz.z0 + Pz.z1) / 2;
+  const P = positionWorld.xz;
+  const q = P.sub(vec2(cx, cz));
+  const r = q.length();
+  const w = q.div(1.5).add(0.5);
+  const id = floor(w), local = fract(w);
+  const h = hash23(id.add(3.3)), h2 = hash23(id.add(21.7));
+  const S = pairSampleGrad(T.stone.c, T.stone.n, P.div(1.8).add(h.xy.mul(13.0)), dFdx(P).div(1.8), dFdy(P).div(1.8));
+  const Gr = pairSampleGrad(T.granite.c, T.granite.n, P.div(0.8).add(h2.xy.mul(5.0)), dFdx(P).div(0.8), dFdy(P).div(0.8));
+  const band = max(step(mod(id.x, 4), 0.5), step(mod(id.y, 4), 0.5));
+  const ring = max(
+    smoothstep(10.1, 10.15, r).mul(smoothstep(11.05, 11.0, r)),
+    smoothstep(17.0, 17.05, r).mul(smoothstep(17.55, 17.5, r)),
+  );
+  const light = vec3(0.6, 0.6, 0.63).mul(mix(0.78, 1.0, h.z));
+  const dark = vec3(0.14, 0.14, 0.16).mul(mix(0.85, 1.1, h2.z));
+  let albedo = mix(S.color, Gr.color, 0.5).mul(mix(light, dark, max(band.mul(0.85), ring)));
+  // slab joints (ring bands are continuous inlays, no joints)
+  const e = min(min(local.x, local.x.oneMinus()), min(local.y, local.y.oneMinus())).mul(1.5);
+  const joint = smoothstep(0.012, 0.005, e).mul(ring.oneMinus());
+  albedo = mix(albedo, vec3(0.02, 0.02, 0.022), joint);
+  albedo = albedo.mul(mix(1.0, 0.72, smoothstep(0.6, 0.85, fbm(P.mul(0.25).add(9.0), 3))));
+  const height = smoothstep(0.0, 0.025, e).mul(0.004).add(h.x.mul(0.003)).add(S.h.mul(0.0015));
+  const nxy = slopeFromHeight(height, P).negate().add(S.nxy.mul(0.35)).add(Gr.nxy.mul(0.25)).add(h2.xy.sub(0.5).mul(0.025));
+  const rough = mix(mix(float(0.7), float(0.45), ring), float(0.9), joint);
+  const level = fbm(P.mul(0.22).add(3.0), 3).add(h.x.mul(0.05)).add(joint.mul(0.25));
+  const puddle = smoothstep(0.68, 0.7, level).add(joint.mul(0.5)).min(1);
+  const L = wetLayer({ albedo, roughness: rough, nxy, porosity: 0.55, puddle, ripple: rainRipples(P), filmRipple: 0.12, film: [0.3, 0.05] });
   m.colorNode = L.albedo;
   m.roughnessNode = clamp(L.roughness, 0.015, 1);
   m.metalnessNode = float(0);

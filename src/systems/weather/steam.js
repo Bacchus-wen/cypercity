@@ -10,7 +10,8 @@ import {
 import { U, makeLightFn, mulberry32, softClamp } from './common.js';
 import { MAX_LIGHTS } from './lights.js';
 
-const ANIME_STEAM = typeof location !== 'undefined' && new URLSearchParams(location.search).get('look') === 'anime';
+import { TOD_PRESET } from '../../engine/timeOfDay.js';
+const ANIME_STEAM = typeof location !== 'undefined' && new URLSearchParams(location.search).get('look') !== 'legacy'; // anime look is the default
 
 // CPU-generated 2x2 atlas of soft billowy puffs (tileable value-noise fbm masked by radial falloff)
 function makePuffAtlas(size = 256) {
@@ -149,7 +150,11 @@ export function steamEmitters(ctx) {
   };
   const E = [];
   // street manholes / vents on the avenue
-  for (const [x, z, s] of [[-2.6, 14, 1.0], [2.8, -24, 0.9], [-1.8, -52, 1.1], [3.2, -92, 0.9], [-3.0, -128, 1.0], [1.0, -170, 1.0]]) {
+  // (restyle map: manholes sit in the lanes beside the median, never on it)
+  const AV = L.avenue, lx = AV.medianHalf ? [AV.medianHalf + 0.3 + AV.laneWidth * 0.5, AV.medianHalf + 0.3 + AV.laneWidth * 1.5] : null;
+  const holes = lx ? [[-lx[0], 14, 1.0], [lx[1], -24, 0.9], [-lx[1], -52, 1.1], [lx[0], -100, 0.9], [-lx[0], -128, 1.0], [lx[1], -190, 1.0]]
+    : [[-2.6, 14, 1.0], [2.8, -24, 0.9], [-1.8, -52, 1.1], [3.2, -92, 0.9], [-3.0, -128, 1.0], [1.0, -170, 1.0]];
+  for (const [x, z, s] of holes) {
     E.push({ type: 0, pos: [x, (H(x, z) ?? 0) + 0.02, z], dir: [0, 1, 0], strength: 0.5 * s, size: 1.7, spread: 0.7, life: 5.0, speed: 1.5 });
   }
   // cross street vents
@@ -182,13 +187,18 @@ export function steamEmitters(ctx) {
   for (let x = -14; x > -88; x -= 10) {
     E.push({ type: 2, pos: [x, alleyY(x) + 0.05, L.alley.z], strength: 0.10, size: 4.5, spread: 9, life: 9, speed: 0 });
   }
+  // (dry weather - the restyle's dusk - keeps only a trace of ground and canal mist: big lit mist sprites read as
+  //  white discs over the water in the low sun)
+  const DRY = (TOD_PRESET?.weather.rain ?? 1) < 0.05 ? 1 : 0;
   // avenue low mist near ground (subtle)
-  for (let z = 30; z > -200; z -= 22) E.push({ type: 2, pos: [0, 0.05, z], strength: 0.05, size: 6, spread: 16, life: 10, speed: 0 });
+  for (let z = 30; z > -200; z -= 22) E.push({ type: 2, pos: [0, 0.05, z], strength: DRY ? 0.025 : 0.05, size: 6, spread: 16, life: 10, speed: 0 });
   // river mist
   const R = L.river;
   for (let z = 40; z > -320; z -= 18) {
-    E.push({ type: 2, pos: [R.xCenter - R.halfWidth * 0.5, R.waterLevel + 0.15, z], strength: 0.12, size: 9, spread: 30, life: 12, speed: 0 });
-    E.push({ type: 2, pos: [R.xCenter + R.halfWidth * 0.4, R.waterLevel + 0.15, z - 9], strength: 0.12, size: 9, spread: 30, life: 12, speed: 0 });
+    const sp = Math.min(30, R.halfWidth * 1.4); // (narrower canal: mist stays over the water)
+    const st = DRY ? 0.035 : 0.12;
+    E.push({ type: 2, pos: [R.xCenter - R.halfWidth * 0.5, R.waterLevel + 0.15, z], strength: st, size: 9, spread: sp, life: 12, speed: 0 });
+    E.push({ type: 2, pos: [R.xCenter + R.halfWidth * 0.4, R.waterLevel + 0.15, z - 9], strength: st, size: 9, spread: sp, life: 12, speed: 0 });
   }
   return E;
 }

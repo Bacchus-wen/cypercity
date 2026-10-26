@@ -1,4 +1,6 @@
 // Pedestrian population: lanes from LAYOUT, seeded spawning, cheap steering + avoidance.
+import { TOD_PRESET } from '../../engine/timeOfDay.js';
+import { tacoEnabled, tacoSpot } from '../player/taco.js';
 export function mulberry32(a) {
   return function () {
     a |= 0; a = (a + 0x6d2b79f5) | 0;
@@ -17,8 +19,22 @@ export function buildLanes(L) {
   };
   const sx = A.roadHalfWidth + A.sidewalkWidth / 2; // 8
   // avenue sidewalks (dense, the hero street)
-  add(sx + 0.15, A.zStart, sx + 0.15, A.zEnd, A.sidewalkWidth / 2 - 0.55, 1 / 2.6, 'avenue');
-  add(-sx - 0.15, A.zStart, -sx - 0.15, A.zEnd, A.sidewalkWidth / 2 - 0.55, 1 / 2.6, 'avenue');
+  // (restyle map: the lane keeps walkers' bodies clear of the kerb strip - lamps, hydrants, trash cans, newsboxes)
+  const lo = A.medianHalf ? 0.5 : 0.15, lhw = A.sidewalkWidth / 2 - (A.medianHalf ? 0.9 : 0.55);
+  add(sx + lo, A.zStart, sx + lo, A.zEnd, lhw, 1 / 2.6, 'avenue');
+  add(-sx - lo, A.zStart, -sx - lo, A.zEnd, lhw, 1 / 2.6, 'avenue');
+  if (A.bay) {
+    // restyle map: walkers on the east sidewalk keep to the building side past the pull-in bay (lat + = toward the road)
+    const ln = lanes[0], b = A.bay;
+    (ln.pinches ||= []).push({ s0: A.zStart - (b.z1 + b.taper), s1: A.zStart - (b.z0 - b.taper), latMax: ln.ax - (A.roadHalfWidth + b.depth + 0.45), ramp: 4 });
+  }
+  // restyle map: bus shelters on the kerb side (landmarks/streetkit.js) - walkers pass behind them
+  for (const sh of L.busShelters || []) {
+    // both sidewalk lanes run north (lateral axis -x, x = ax - lat): east walkers need x >= kerb + depth (lat <= ...),
+    // west walkers x <= -(kerb + depth) (lat >= ...)
+    const ln = lanes[sh.side > 0 ? 0 : 1], edge = A.roadHalfWidth + sh.depth + 0.5, s0 = A.zStart - (sh.z + sh.len / 2), s1 = A.zStart - (sh.z - sh.len / 2);
+    (ln.pinches ||= []).push(sh.side > 0 ? { s0, s1, latMax: ln.ax - edge, ramp: 3 } : { s0, s1, latMin: edge + ln.ax, ramp: 3 });
+  }
   // cross streets: both sidewalks, west and east of the avenue
   const cz = C.roadHalfWidth + C.sidewalkWidth / 2;
   const xIn = A.roadHalfWidth + A.sidewalkWidth + 0.5;
@@ -33,6 +49,25 @@ export function buildLanes(L) {
   add(pc - 1.2, P.zStart, pc - 1.2, P.zEnd, (P.xMax - P.xMin) / 2 - 2.2, 1 / 4.5, 'river');
   // alley (with stairs; y from ground.heightAt)
   add(AL.xStart - 1.5, AL.z, AL.xEnd + 4, AL.z, AL.width / 2 - 0.7, 1 / 5, 'alley');
+  // central plaza (restyle map): walks around the monument and across the square, in front of the deck steps
+  if (L.plaza) {
+    const PZ = L.plaza, xi = -(A.roadHalfWidth + A.sidewalkWidth + 0.6);
+    const mx = (PZ.x0 + PZ.x1) / 2 + 4, mz = (PZ.z0 + PZ.z1) / 2, xd = PZ.x0 + 12 + Math.round(PZ.deckY / 0.3) * 0.42 + 1.6; // in front of the deck steps
+    for (const dz of [-13, 13]) add(xi - 1, mz + dz, xd, mz + dz, 1.6, 1 / 6, 'plaza');
+    for (const dx of [-10.5, 10.5]) add(mx + dx, PZ.z1 - 3, mx + dx, PZ.z0 + 4, 1.6, 1 / 7, 'plaza');
+    add(xd, PZ.z1 - 5, xd, PZ.z0 + 6, 1.4, 1 / 8, 'plaza');
+  }
+  // (after the cross-street lanes exist) restyle map + DUSKLINE: the taco truck queue stands at the kerb - walkers on that sidewalk pass behind it
+  if (tacoEnabled(L)) {
+    const T = tacoSpot(L), c = C.zs[L.tacoTruck.street], czz = C.roadHalfWidth + C.sidewalkWidth / 2, xIn0 = A.roadHalfWidth + A.sidewalkWidth + 0.5;
+    const ln = lanes.find((q) => q.district === 'cross' && Math.abs(q.az - (c + czz)) < 0.01 && Math.abs(q.ax - (T.x < 0 ? -xIn0 : xIn0)) < 0.01);
+    if (ln) {
+      const sA = (x) => (x - ln.ax) * ln.dx; // (lane runs along x)
+      const q0 = sA(T.hatch[0] - 0.6), q1 = sA(T.hatch[0] + 2.6);
+      // lateral axis (dz, -dx): +lat = +z for a westbound lane; the queue sits at kerb + 0.55 (lat = kerb + 0.55 - az)
+      (ln.pinches ||= []).push({ s0: Math.min(q0, q1), s1: Math.max(q0, q1), latMin: (T.kerbZ + 0.55 - ln.az) * -ln.dx + 0.75, ramp: 3 });
+    }
+  }
   return lanes;
 }
 
@@ -54,13 +89,15 @@ export class Population {
   }
 
   rainGear(r, ag) {
-    // ~45% umbrellas in the rain (black most common, clear plastic, a few LED cyber umbrellas)
+    // ~45% umbrellas in the rain (black most common, clear plastic, a few LED cyber umbrellas); in dry weather (the
+    // restyle's dusk) nobody carries one and more people walk with their phones out
     const u = r();
-    if (u < 0.22) ag.umbrella = 'black';
-    else if (u < 0.36) ag.umbrella = 'clear';
-    else if (u < 0.45) ag.umbrella = 'led';
+    const wet = (TOD_PRESET?.weather.rain ?? 1) > 0.05;
+    if (wet && u < 0.22) ag.umbrella = 'black';
+    else if (wet && u < 0.36) ag.umbrella = 'clear';
+    else if (wet && u < 0.45) ag.umbrella = 'led';
     else ag.umbrella = null;
-    ag.phone = !ag.umbrella && r() < 0.18;
+    ag.phone = !ag.umbrella && r() < (wet ? 0.18 : 0.3);
   }
 
   spawn() {
@@ -128,7 +165,42 @@ export class Population {
           addIdler(x, z, (lookIn ? outYaw + Math.PI : outYaw) + (r() - 0.5) * 0.8, this.pickLook(r));
         }
       }
-    } else {
+    }
+    // restyle map: people who stay put - waiting at the bus shelters, queuing at the plaza kiosks, watching the
+    // monument from the pool rim, and a small crowd around the busker by the deck steps
+    const L = ctx.layout;
+    if (L.plaza) {
+      const A = L.avenue, P = L.plaza, kerb = A.roadHalfWidth;
+      const face = (fx, fz) => Math.atan2(fx, fz);
+      for (const sh of L.busShelters || []) {
+        // (the bench fills the middle 70% of the shelter: riders stand in the free ends inside - the closed north end
+        //  by the ad panel, the open south end - and one more just outside the open end, all facing the road)
+        const xb = sh.side * (kerb + 1.15), hl = sh.len / 2, free = hl - sh.len * 0.35;
+        const slots = [[xb, sh.z - hl + free / 2 + 0.02], [xb, sh.z + hl - free / 2], [sh.side * (kerb + 0.95), sh.z + hl + 0.9]];
+        for (const [x, z] of slots) if (r() < 0.8) addIdler(x, z, face(-sh.side, 0) + (r() - 0.5) * 0.5, this.pickLook(r));
+      }
+      const cx = (P.x0 + P.x1) / 2 + 4, cz = (P.z0 + P.z1) / 2, kz = P.z0 + 3.2;
+      for (const kx of [cx - 6.5, cx, cx + 6.5, cx + 17.5]) {
+        const n = 1 + Math.floor(r() * 3);
+        for (let i = 0; i < n; i++) addIdler(kx + (r() - 0.5) * 0.8, kz + 2.5 + i * 0.95, face(0, -1) + (r() - 0.5) * 0.3, this.pickLook(r));
+      }
+      // pool watchers: on the square pool's edges (half size 7.2 + rim), near the middle of each side - the benches
+      // stand on the 22.5-degree diagonals at r 9.5
+      for (const [ax, az] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) {
+        const t = (r() - 0.5) * 3.0, x = cx + ax * 7.75 + az * t, z = cz + az * 7.75 + ax * t;
+        addIdler(x, z, face(-ax, -az) + (r() - 0.5) * 0.3, this.pickLook(r));
+      }
+      // taco truck queue: three at the hatch, facing the truck (DUSKLINE interface only)
+      if (tacoEnabled(L)) {
+        const T = tacoSpot(L);
+        [0, 0.95, 1.9].forEach((dx, i) => { if (i === 0 || r() < 0.85) addIdler(T.hatch[0] + dx, T.kerbZ + 0.55, face(0, -1) + (r() - 0.5) * 0.4, this.pickLook(r)); });
+      }
+      // busker: 2.4 m past the walkway that runs in front of the deck steps (hw 1.4), listeners further into the square
+      const bx = P.x0 + 12 + Math.round(P.deckY / 0.3) * 0.42 + 4.0, bz = cz + 11;
+      addIdler(bx, bz, face(1, 0), this.pickLook(r)); // the busker
+      for (const a of [-0.6, 0, 0.6]) if (r() < 0.8) addIdler(bx + Math.cos(a) * 2.6, bz + Math.sin(a) * 2.6, face(-Math.cos(a), -Math.sin(a)), this.pickLook(r));
+    }
+    if (!spots.length) {
       // fallback: along the avenue frontage
       const A = ctx.layout.avenue;
       for (let z = A.zStart; z > A.zEnd; z -= 7 + r() * 10) {
@@ -143,6 +215,13 @@ export class Population {
 
   placeOnLane(ag) {
     const ln = this.lanes[ag.lane];
+    for (const p of ln.pinches || []) {
+      const d = Math.max(p.s0 - ag.s, ag.s - p.s1, 0); // distance outside the pinched stretch
+      if (d >= p.ramp) continue;
+      const f = d / p.ramp;
+      if (p.latMax !== undefined) { const lim = p.latMax + (ln.hw - p.latMax) * f; if (ag.lat > lim) ag.lat = lim; }
+      if (p.latMin !== undefined) { const lim = p.latMin - (ln.hw + p.latMin) * f; if (ag.lat < lim) ag.lat = lim; }
+    }
     // lateral axis = (dz, -dx)
     ag.x = ln.ax + ln.dx * ag.s + ln.dz * ag.lat;
     ag.z = ln.az + ln.dz * ag.s - ln.dx * ag.lat;
