@@ -57,16 +57,20 @@ export function sidewalkPolys() {
         pts.push([xr, B.z1 + B.t], [B.x1, B.z1], [B.x1, B.z0], [xr, B.z0 - B.t]);
       }
       pts.push([xr, zLo]); if (northIsCross) round.push(pts.length - 1);
+      // (the original arms point the wrong way - from the kerb INTO the cross street, so the street's lanes were paved
+      //  over with sidewalk and the self-intersecting C failed to triangulate on the west side. The restyle map
+      //  turns them into the block: the arm spans kerb .. kerb + crSide. The original map keeps its geometry.)
+      const ARM = G.medHalf > 0 ? -1 : 1;
       if (northIsCross) {
         pts.push([xEnd, zLo]);
-        pts.push([xEnd, zLo - G.crSide]);
-        pts.push([xi, zLo - G.crSide]);
+        pts.push([xEnd, zLo - ARM * G.crSide]);
+        pts.push([xi, zLo - ARM * G.crSide]);
       } else {
         pts.push([xi, zLo]);
       }
       if (southIsCross) {
-        pts.push([xi, zHi + G.crSide]);
-        pts.push([xEnd, zHi + G.crSide]);
+        pts.push([xi, zHi + ARM * G.crSide]);
+        pts.push([xEnd, zHi + ARM * G.crSide]);
         pts.push([xEnd, zHi]);
       } else {
         pts.push([xi, zHi]);

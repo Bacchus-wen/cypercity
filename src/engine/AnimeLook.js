@@ -84,7 +84,10 @@ class AnimeLightingModel extends PhysicalLightingModel {
     // up-facing environment surfaces (wet ground) keep only a faint highlight shape: lamps close to wet paving
     // otherwise paint large blown-out "egg" blobs; their reflections come from the SSR colour blocks instead
     const ground = smoothstep(0.82, 0.95, normalWorld.y).mul(float(1).sub(figure));
-    const hard = smoothstep(th.mul(0.8), th.mul(1.25), luminance(ggx)).mul(mix(smoothstep(0.12, 0.3, dotNL), float(1), figure))
+    // (ground gets a stricter grazing cut: the unshadowed low sun otherwise paints a pale glint column down the
+    //  street even where the buildings hide it; lamps above the street hit the ground steeply and keep theirs)
+    const grazing = mix(smoothstep(0.12, 0.3, dotNL), smoothstep(0.24, 0.4, dotNL), ground);
+    const hard = smoothstep(th.mul(0.8), th.mul(1.25), luminance(ggx)).mul(mix(grazing, float(1), figure))
       .mul(mix(float(1), P.groundSpec, ground));
     const tint = specularColorBlended.div(luminance(specularColorBlended).max(0.02)).min(vec3(1.5));
     reflectedLight.directSpecular.addAssign(irradiance.mul(hard).mul(P.specPeak).mul(tint));

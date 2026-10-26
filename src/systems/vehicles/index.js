@@ -13,6 +13,8 @@ import { loadModels } from './models.js';
 import { Fleet } from './fleet.js';
 import { Traffic, SkyTraffic, mulberry32, PALETTE } from './traffic.js';
 import { buildBuses, BUS } from './bus.js';
+import { ANIME } from '../../engine/AnimeLook.js';
+import { ContactShadows } from '../../engine/contactShadows.js';
 import { sprayEnabled } from '../player/spray.js';
 import { tacoEnabled, tacoSpot } from '../player/taco.js';
 import { VehicleLights } from './lights.js';
@@ -130,6 +132,8 @@ export default {
 
     this.driven = null; this.loose = [];
     this.allGround = [...this.parked, ...this.traffic.cars];
+    // anime look: soft rounded footprints under the ground cars and buses
+    if (ANIME) this.shadows = new ContactShadows(ctx.scene, this.allGround.length + this.traffic.buses.length + 8, { shape: 'box', strength: 0.85, name: 'car_contact_shadows' });
     this.all = [...this.allGround, ...this.sky.cars];
     const self = this;
     ctx.api.vehicles = {
@@ -291,6 +295,13 @@ export default {
     cam.updateMatrixWorld();
     this.busView?.update(dt);
     const visible = this.fleet.update(this.all, cam);
+    if (this.shadows) {
+      const S = this.shadows, cp = cam.position; S.begin();
+      const put = (c, w, l) => { if (c.pos.y > 4 || Math.abs(c.pos.x - cp.x) + Math.abs(c.pos.z - cp.z) > 110) return; S.add(c.pos.x, c.pos.y, c.pos.z, 2 * Math.atan2(c.quat.y, c.quat.w), w, l); };
+      for (const c of this.allGround) { const M = this.models[c.type]; if (M) put(c, M.width * 1.18, M.length * 1.08); }
+      for (const b of this.traffic.buses) put(b, BUS.w * 1.06, BUS.len * 1.02);
+      S.end();
+    }
     const spotCar = this.driven ? this.driven.car : (this.hero.kind === 'hero' ? this.hero : null);
     this.lights.update(visible, this.allGround, this.sky.cars, cam, spotCar);
   },

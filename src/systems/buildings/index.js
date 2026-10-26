@@ -64,7 +64,7 @@ export default {
     const mats = {
       facade: createFacadeMaterial({ albedo, normal, interior, wetness, noise, restyle }),
       detail: createDetailMaterial({ atlas: shopAtlas, wetness, noise }),
-      glass: createGlassMaterial(),
+      glass: createGlassMaterial({ restyle: ART_RESTYLE }),
     };
     this.mats = mats;
 

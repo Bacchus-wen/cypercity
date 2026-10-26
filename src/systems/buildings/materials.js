@@ -354,12 +354,29 @@ export function createDetailMaterial({ atlas, wetness, noise }) {
   return m;
 }
 
-export function createGlassMaterial() {
+export function createGlassMaterial({ restyle = false } = {}) {
   const m = new THREE.MeshStandardNodeMaterial({ transparent: true, depthWrite: false });
   const P = positionWorld;
   const smear = vnoise(vec2(P.x.add(P.z).mul(3.0), P.y.mul(0.6)));
   m.colorNode = vec4(vec3(0.03, 0.04, 0.045), 1);
   m.opacityNode = mix(float(0.12), float(0.3), smear);
+  if (restyle) {
+    // anime shop glass (the photoreal pane reflected almost nothing in cel bands): the upper pane takes a cool
+    // reflection of the sky and the neon across the street, and some panes carry two diagonal shine strokes
+    const v = uv().y; // shopfront glass quads: 0 at the kick plate, 1 at the transom
+    const dg = P.x.add(P.z).mul(0.55).add(P.y.mul(0.9)).div(4.2);
+    const cell = floor(dg), f = fract(dg);
+    const pick = step(0.42, fract(sin(cell.mul(12.9898).add(4.1)).mul(43758.5453)));
+    const shine = smoothstep(0.05, 0.0, abs(f.sub(0.35))).add(smoothstep(0.02, 0.0, abs(f.sub(0.46))).mul(0.7)).mul(pick);
+    const top = smoothstep(0.4, 1.0, v);
+    // the reflection carries the colour of the street opposite: each stretch of glass picks up a neon cast (magenta,
+    // cyan or sodium amber), blended into the cool sky at the very top
+    const nh = vnoise(vec2(P.x.add(P.z).mul(0.07), 3.7));
+    const neon = mix(mix(vec3(0.62, 0.14, 0.46), vec3(0.1, 0.48, 0.6), smoothstep(0.3, 0.55, nh)), vec3(0.7, 0.42, 0.12), smoothstep(0.62, 0.8, nh));
+    const reflCol = mix(neon.mul(0.55), vec3(0.16, 0.22, 0.32), smoothstep(0.75, 1.0, v));
+    m.emissiveNode = reflCol.mul(top.mul(0.8)).add(vec3(0.85, 0.92, 1.0).mul(shine.mul(0.55)));
+    m.opacityNode = clamp(mix(float(0.12), float(0.3), smear).add(top.mul(0.3)).add(shine.mul(0.32)), 0, 0.9);
+  }
   m.roughnessNode = mix(float(0.03), float(0.12), smear);
   m.metalnessNode = float(0.0);
   return m;

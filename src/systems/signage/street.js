@@ -8,6 +8,7 @@ import { alleyGroundY } from './facades.js';
 import { nearestFacade, makeFacade } from './featured.js';
 import { propGltf } from '../propModels.js';
 import { signalState } from '../vehicles/traffic.js';
+import { addFootprint } from '../../engine/contactShadows.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -72,6 +73,7 @@ export async function buildStreet(ctx, sb, L) {
     const lp = new THREE.Vector3(2.2, 7.75, 0).applyAxisAngle(UP, yaw).add(new THREE.Vector3(x, y, z));
     sb.light(lp, col, ART_RESTYLE ? 34 : 55, 22, 0, 0, 1.4); // (restyle: softer pools, no hard white eggs on the road)
     collider(x, y, z, 4, 0.13);
+    addFootprint(ctx, x, y, z, 0.75);
   };
   const nearCross = (z, pad) => cs.zs.some((c) => Math.abs(z - c) < cs.roadHalfWidth + cs.sidewalkWidth + pad);
   let k = 0;

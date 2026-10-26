@@ -48,7 +48,7 @@ const LAYOUT_MAP2 = {
   // drone light show high above the district, west of the Spire, facing back down the boulevard (landmarks/droneshow.js)
   droneShow: { x: -66, y: 178, z: -480, w: 130, yaw: 0.1, count: 520, size: 1.0 },
   // SOLANO SPRAY drive-in respray bay in the south kerb lane of the first cross street (player/spray.js)
-  spray: { x: 60, z: -80.35, w: 2.2, len: 7, kerbZ: -79.5 }, // (tight to the kerb: a car on it clears the lane traffic)
+  spray: { x: 60, z: -80.45, w: 1.9, len: 7, kerbZ: -79.5 }, // (pad -79.5..-81.4: flush with the kerb; a car on it clears the lane traffic)
   // EL FARO taco truck at the south kerb of the second cross street (player/taco.js)
   tacoTruck: { street: 1, x: -40, len: 5.6, w: 1.55 }, // (w 1.55: outer edge 1.15 m from the lane centre - widest traffic van half width 1.10)
   // kerbside bus shelters on the boulevard (landmarks/streetkit.js; crowd walkers pass behind them)

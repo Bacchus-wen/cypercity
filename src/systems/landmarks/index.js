@@ -19,6 +19,7 @@ import { buildSpire } from './spire.js';
 import { buildDroneShow } from './droneshow.js';
 import { buildSprayBooth } from '../player/spray.js';
 import { buildPigeons } from './pigeons.js';
+import { ContactShadows, addFootprint } from '../../engine/contactShadows.js';
 import { buildTacoTruck } from '../player/taco.js';
 
 const optional = async (name, fn) => {
@@ -94,6 +95,7 @@ export default {
       if (drones) { api.droneShow = drones; this.updaters.push(drones.update); }
       // (flying pigeons keep out of the palm crowns: canal promenade row + plaza palms)
       const palmsAll = [...palmSpots(L).promenade, ...plazaPalmSpots(L)];
+      for (const p of [...palmsAll, ...palmSpots(L).median]) addFootprint(ctx, p.x, p.y ?? ctx.api.ground?.heightAt?.(p.x, p.z) ?? 0.15, p.z, 1.3 * (p.scale ?? 1));
       const crowns = palmsAll.flatMap((p) => {
         const y = p.y ?? 0, sc = p.scale ?? 1;
         return [{ x: p.x, z: p.z, r: 0.5, y0: y, y1: y + 12 * sc }, { x: p.x, z: p.z, r: 3.2 * sc, y0: y + 5 * sc, y1: y + 12 * sc }]; // trunk + crown
@@ -132,6 +134,12 @@ export default {
   },
 
   update(dt, t, ctx) {
+    // first frame: every system has registered its street-furniture footprints by now - draw them in one batch
+    if (!this._fp && ctx.footprints?.length) {
+      this._fp = new ContactShadows(ctx.scene, ctx.footprints.length, { shape: 'ellipse', strength: 0.6, name: 'static_contact_shadows' });
+      this._fp.begin(); for (const f of ctx.footprints) this._fp.add(...f); this._fp.end();
+      this._fp.mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+    }
     U.wet.value = ctx.weather?.wetness ?? 1;
     U.lightning.value = ctx.weather?.lightning ?? 0;
     for (const u of this.updaters) u(dt, t, ctx);

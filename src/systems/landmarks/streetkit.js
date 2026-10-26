@@ -4,6 +4,7 @@
 import * as THREE from 'three/webgpu';
 import { uv, vec2, vec3, float, texture, sin, time } from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { addFootprint } from '../../engine/contactShadows.js';
 
 const std = (color, rough = 0.6, metal = 0.2) => new THREE.MeshStandardNodeMaterial({ color, roughness: rough, metalness: metal });
 const glow = (c, i) => { const m = new THREE.MeshBasicNodeMaterial(); m.colorNode = vec3(...c).mul(i); m.lineMask = 1; return m; };
@@ -114,6 +115,12 @@ export function buildStreetKit(ctx, tex, root) {
   }
 
   root.add(g);
+  // contact footprints (anime look): hydrants, cans, newsboxes, shelters
+  const fpAt = (m, s) => { const p = new THREE.Vector3().setFromMatrixPosition(m); addFootprint(ctx, p.x, p.y, p.z, s); };
+  for (const m of hyd) fpAt(m, 0.62);
+  for (const m of cans) fpAt(m, 0.95);
+  for (const m of boxes.flat()) fpAt(m, 0.75);
+  for (const sh of shelters) addFootprint(ctx, sh.side * (kerb + (0.35 + sh.depth) / 2), y0, sh.z, sh.depth + 0.5, sh.len + 0.5);
   if (ctx.physics?.world && ctx.physics.RAPIER) {
     const { RAPIER, world } = ctx.physics;
     for (const [x, y, z, hx, hy, hz] of colliders) world.createCollider(RAPIER.ColliderDesc.cuboid(hx, hy, hz).setTranslation(x, y, z));

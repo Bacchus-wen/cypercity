@@ -1,6 +1,7 @@
 // Ground-floor shopfronts with real interior geometry (ramen, konbini, izakaya, pachinko, bar, boutique, lobby, shutters).
 import { mulberry32 } from './rng.js';
 import { DETAIL_ATTRS, FACADE_ATTRS, sideFrame, trimAttr } from './architecture.js';
+import { ART_RESTYLE } from '../restyleArt.js';
 
 // Shop atlas (4096x4096 canvas) slots in pixels: [x, y, w, h]
 export const ATLAS_SIZE = 4096;
@@ -103,10 +104,34 @@ export class ShopBuilder {
     const rotY = -Math.atan2(c.fr.right[2], c.fr.right[0]);
     bucket.box(p[0], p[1], p[2], sw, sh, sd, a, rotY);
   }
-  // textured quad facing outward (toward the street), spanning s0..s1, y0..y1 at depth d
+  // textured quad facing outward (toward the street), spanning s0..s1, y0..y1 at depth d.
+  // Texel aspect is preserved: the run is split into bays, each mapping its own crop of the slot (sub = [x, y, w, h]
+  // slot fractions: y/h choose the vertical band, x/w only the original default crop). Returns the bay seams (s).
+  // (The original stretched one crop across the whole run - up to 8x wide on a konbini's shelves and racks.)
   tquad(c, s0, s1, y0, y1, d, slot, col, em, sub = null, rough = 0.6, flipFacing = false) {
-    const p0 = c.P(s0, y0, d), p1 = c.P(s1, y0, d), p2 = c.P(s1, y1, d), p3 = c.P(s0, y1, d);
     const a = { aCol: [col[0], col[1], col[2], em], aPbr: [rough, 0, 1, 0] };
+    if (!ART_RESTYLE) { this.squad(c, s0, s1, y0, y1, d, slot, a, sub, flipFacing); return []; } // (original behaviour)
+    const [, , sw, sh] = SLOTS[slot];
+    const vy = sub ? sub[1] : 0, vh = sub ? sub[3] : 1;
+    const w = s1 - s0, h = y1 - y0;
+    const fullW = h * sw / (sh * vh); // metres covered by the full slot width at this height
+    const n = Math.max(1, Math.ceil(w / Math.min(fullW, 3.2) - 0.15));
+    const segW = w / n, cw = Math.min(1, segW / fullW); // crop width (slot fraction) keeping the aspect
+    const seams = [];
+    for (let i = 0; i < n; i++) {
+      const sa = s0 + segW * i, sb = sa + segW;
+      if (i) seams.push(sa);
+      const ux = n === 1 && sub && cw >= sub[2] ? sub[0] : c.rng.range(0, 1 - cw);
+      const u = (uu, vv) => slotUV(slot, ux + uu * cw, vv, [0, vy, 1, vh]);
+      const p0 = c.P(sa, y0, d), p1 = c.P(sb, y0, d), p2 = c.P(sb, y1, d), p3 = c.P(sa, y1, d);
+      if (!flipFacing) c.det.quad(p0, p1, p2, p3, u(0, 0), u(1, 0), u(1, 1), u(0, 1), a);
+      else c.det.quad(p1, p0, p3, p2, u(1, 0), u(0, 0), u(0, 1), u(1, 1), a);
+    }
+    return seams;
+  }
+  // one crop stretched over the quad (the original mapping; the restyle uses it only where stretching is invisible)
+  squad(c, s0, s1, y0, y1, d, slot, a, sub, flipFacing = false) {
+    const p0 = c.P(s0, y0, d), p1 = c.P(s1, y0, d), p2 = c.P(s1, y1, d), p3 = c.P(s0, y1, d);
     const u = (uu, vv) => slotUV(slot, uu, vv, sub);
     if (!flipFacing) c.det.quad(p0, p1, p2, p3, u(0, 0), u(1, 0), u(1, 1), u(0, 1), a);
     else c.det.quad(p1, p0, p3, p2, u(1, 0), u(0, 0), u(0, 1), u(1, 1), a);
@@ -140,9 +165,9 @@ export class ShopBuilder {
   interiorShell(c) {
     const { s0, s1, ho, depth: D, type } = c;
     const lc = LIGHT[type] || [1, 0.9, 0.8];
-    const wallCol = { ramen: [0.55, 0.4, 0.26], konbini: [0.92, 0.93, 0.95], izakaya: [0.35, 0.22, 0.12], pachinko: [0.9, 0.75, 0.5], bar: [0.16, 0.1, 0.07], boutique: [0.92, 0.9, 0.86], lobby: [0.8, 0.8, 0.78] }[type];
-    const wallEm = { ramen: 0.35, konbini: 0.7, izakaya: 0.3, pachinko: 0.8, bar: 0.2, boutique: 0.6, lobby: 0.45 }[type];
-    const floorCol = { ramen: [0.25, 0.16, 0.1], konbini: [0.75, 0.75, 0.73], izakaya: [0.2, 0.13, 0.08], pachinko: [0.5, 0.12, 0.1], bar: [0.1, 0.08, 0.08], boutique: [0.55, 0.45, 0.35], lobby: [0.4, 0.4, 0.42] }[type];
+    const wallCol = { ramen: [0.55, 0.4, 0.26], konbini: [0.92, 0.93, 0.95], izakaya: [0.35, 0.22, 0.12], pachinko: [0.9, 0.75, 0.5], bar: [0.16, 0.1, 0.07], boutique: ART_RESTYLE ? [0.62, 0.5, 0.42] : [0.92, 0.9, 0.86], lobby: ART_RESTYLE ? [0.3, 0.26, 0.24] : [0.8, 0.8, 0.78] }[type];
+    const wallEm = { ramen: 0.35, konbini: 0.7, izakaya: 0.3, pachinko: 0.8, bar: 0.2, boutique: ART_RESTYLE ? 0.4 : 0.6, lobby: ART_RESTYLE ? 0.3 : 0.45 }[type];
+    const floorCol = { ramen: [0.25, 0.16, 0.1], konbini: [0.75, 0.75, 0.73], izakaya: [0.2, 0.13, 0.08], pachinko: [0.5, 0.12, 0.1], bar: [0.1, 0.08, 0.08], boutique: [0.55, 0.45, 0.35], lobby: ART_RESTYLE ? [0.1, 0.1, 0.11] : [0.4, 0.4, 0.42] }[type];
     const ceilH = ho + 0.25;
     const em = (k) => [wallCol[0] * lc[0], wallCol[1] * lc[1], wallCol[2] * lc[2]];
     // floor (faces up)
@@ -152,14 +177,26 @@ export class ShopBuilder {
     c.det.quad(c.P(s0, ceilH, 0), c.P(s0, ceilH, D), c.P(s1, ceilH, D), c.P(s1, ceilH, 0), [0, 0], [1, 0], [1, 1], [0, 1],
       { aCol: [...em(), wallEm * 0.6], aPbr: [0.8, 0, 0, 0] }, [0, -1, 0]);
     // side walls (face inward)
-    const sideSlot = { ramen: 'izakaya', konbini: 'shelves', izakaya: 'izakaya', pachinko: 'pachinko', bar: 'izakaya', boutique: 'shelves', lobby: null }[type];
+    // (restyle: a boutique shows its own garment rails on plain walls, not the konbini's drink shelves)
+    const sideSlot = { ramen: 'izakaya', konbini: 'shelves', izakaya: 'izakaya', pachinko: 'pachinko', bar: 'izakaya', boutique: ART_RESTYLE ? null : 'shelves', lobby: null }[type];
     if (sideSlot) {
       // textured side walls (menus / shelves / machines) instead of flat colour
       const k = type === 'bar' ? [0.6, 0.45, 0.5] : type === 'ramen' ? [0.95, 0.8, 0.65] : [0.9, 0.9, 0.9];
       const a = { aCol: [k[0], k[1], k[2], type === 'pachinko' ? 1.1 : 0.55], aPbr: [0.6, 0, 1, 0] };
       const y0 = (type === 'konbini' || type === 'boutique' || type === 'pachinko') ? 0 : 0.9;
-      this.tileWall(c, [s0, 0.15], [s0, D], y0, ceilH, sideSlot, k, a.aCol[3]);
-      this.tileWall(c, [s1, D], [s1, 0.15], y0, ceilH, sideSlot, k, a.aCol[3]);
+      if (sideSlot === 'shelves' && ART_RESTYLE) {
+        // shelving to 1.9 m in two stacked bands (product scale matching the gondolas), plain wall above
+        for (const [A, Bp] of [[[s0, 0.15], [s0, D]], [[s1, D], [s1, 0.15]]]) {
+          this.tileWall(c, A, Bp, 0.02, 0.96, sideSlot, k, a.aCol[3]);
+          this.tileWall(c, A, Bp, 0.96, 1.9, sideSlot, k, a.aCol[3]);
+        }
+        // (same winding as the plain side walls below: facing into the shop)
+        this.lquad(c, [[s0, 1.9, D], [s0, 1.9, 0.15], [s0, ceilH, 0.15], [s0, ceilH, D]].reverse(), em(), wallEm);
+        this.lquad(c, [[s1, 1.9, 0.15], [s1, 1.9, D], [s1, ceilH, D], [s1, ceilH, 0.15]].reverse(), em(), wallEm);
+      } else {
+        this.tileWall(c, [s0, 0.15], [s0, D], y0, ceilH, sideSlot, k, a.aCol[3]);
+        this.tileWall(c, [s1, D], [s1, 0.15], y0, ceilH, sideSlot, k, a.aCol[3]);
+      }
       if (y0 > 0) {
         this.lquad(c, [[s0, 0, 0], [s0, 0, D], [s0, y0, D], [s0, y0, 0]], [0.18, 0.11, 0.06], 0.12, 0.6);
         this.lquad(c, [[s1, 0, D], [s1, 0, 0], [s1, y0, 0], [s1, y0, D]], [0.18, 0.11, 0.06], 0.12, 0.6);
@@ -169,7 +206,7 @@ export class ShopBuilder {
       this.lquad(c, [[s1, 0, 0], [s1, 0, D], [s1, ceilH, D], [s1, ceilH, 0]].reverse(), em(), wallEm);
     }
     // back wall textured
-    const slot = { ramen: 'ramen', konbini: 'konbini', izakaya: 'izakaya', pachinko: 'pachinko', bar: 'izakaya', boutique: 'shelves', lobby: null }[type];
+    const slot = { ramen: 'ramen', konbini: 'konbini', izakaya: 'izakaya', pachinko: 'pachinko', bar: 'izakaya', boutique: ART_RESTYLE ? null : 'shelves', lobby: null }[type];
     if (slot) {
       const tc = type === 'bar' ? [0.9, 0.6, 0.75] : [1, 1, 1];
       const y0 = (type === 'konbini' || type === 'boutique' || type === 'pachinko') ? 0 : 0.9;
@@ -271,7 +308,13 @@ export class ShopBuilder {
     const rows = D > 4 ? [1.8, 3.2] : [2.0];
     for (const d of rows) {
       this.dbox(c, (s0 + s1) / 2, 0.75, d, (s1 - s0) * 0.7, 1.5, 0.6, [0.9, 0.9, 0.9], 0.4, 0.5);
-      this.tquad(c, s0 + (s1 - s0) * 0.15, s1 - (s1 - s0) * 0.15, 0.02, 1.5, d - 0.31, 'shelves', [1, 1, 1], 0.9, [rng.range(0, 0.5), 0, 0.5, 1]);
+      const ss0 = s0 + (s1 - s0) * 0.15, ss1 = s1 - (s1 - s0) * 0.15;
+      if (!ART_RESTYLE) { this.tquad(c, ss0, ss1, 0.02, 1.5, d - 0.31, 'shelves', [1, 1, 1], 0.9, [rng.range(0, 0.5), 0, 0.5, 1]); continue; }
+      // (two stacked copies: six product rows on a 1.5 m gondola, cans at a believable ~0.2 m)
+      const seams = this.tquad(c, ss0, ss1, 0.02, 0.76, d - 0.31, 'shelves', [1, 1, 1], 0.9, [rng.range(0, 0.5), 0, 0.5, 1]);
+      this.tquad(c, ss0, ss1, 0.76, 1.5, d - 0.31, 'shelves', [1, 1, 1], 0.9, [rng.range(0, 0.5), 0, 0.5, 1]);
+      // steel uprights at the ends and between the bays
+      for (const s of [ss0, ...seams, ss1]) this.dbox(c, s, 0.78, d - 0.32, 0.05, 1.56, 0.05, [0.78, 0.8, 0.82], 0.15, 0.35, 0.8);
     }
     // magazine rack along the window
     this.dbox(c, (s0 + s1) / 2, 0.45, 0.35, s1 - s0 - 0.6, 0.9, 0.3, [0.85, 0.85, 0.85], 0.4, 0.5);
@@ -349,6 +392,28 @@ export class ShopBuilder {
     }
     // mannequin-ish columns at window
     for (const s of [s0 + 0.6, s1 - 0.6]) this.dbox(c, s, 0.9, 0.6, 0.35, 1.7, 0.25, rng.pick([[0.85, 0.85, 0.85], [0.15, 0.15, 0.15]]), 0.25, 0.6);
+    if (ART_RESTYLE) {
+      // garment rails along the back wall: a steel rail with hanging pieces in a small seasonal palette
+      const pal = [[0.08, 0.08, 0.09], [0.78, 0.12, 0.16], [0.9, 0.86, 0.78], [0.15, 0.22, 0.35], [0.85, 0.6, 0.15], [0.35, 0.36, 0.38]];
+      const rd = D - 0.45;
+      this.dbox(c, (s0 + s1) / 2, 1.62, rd, s1 - s0 - 0.6, 0.03, 0.03, [0.75, 0.76, 0.78], 0.2, 0.3, 0.9);
+      for (let s = s0 + 0.45; s < s1 - 0.4; s += rng.range(0.09, 0.16)) {
+        const len = rng.range(0.7, 1.05), col = rng.pick(pal);
+        this.dbox(c, s, 1.58 - len / 2, rd, 0.05, len, 0.42, col, 0.08, 0.85);
+      }
+      // wall shelves of folded pieces along both side walls
+      for (const [sw, k] of [[s0, 1], [s1, -1]]) {
+        for (const y of [0.85, 1.35, 1.85]) {
+          this.dbox(c, sw + k * 0.2, y, D / 2 + 0.2, 0.4, 0.03, D - 1.0, [0.82, 0.8, 0.77], 0.08, 0.5);
+          for (let d = 0.95; d < D - 0.5; d += rng.range(0.32, 0.45)) {
+            const hgt = rng.range(0.08, 0.2);
+            this.dbox(c, sw + k * 0.2, y + 0.015 + hgt / 2, d, 0.3, hgt, 0.26, rng.pick(pal), 0.08, 0.85);
+          }
+        }
+      }
+      // a lit sign panel on the back wall above the rail
+      this.dbox(c, (s0 + s1) / 2, ho - 0.35, D - 0.06, Math.min(2.4, s1 - s0 - 1), 0.32, 0.03, [1.0, 0.92, 0.82], 1.6, 0.5);
+    }
     if (rng.chance(0.5)) this.awning(c, rng.pick([[0.2, 0.2, 0.22], [0.5, 0.1, 0.1]]), true);
   }
 
@@ -359,13 +424,36 @@ export class ShopBuilder {
     this.dbox(c, s0 + 0.15, 1.3, D * 0.6, 0.2, 1.2, 1.6, [0.6, 0.6, 0.62], 0.3, 0.4, 0.6);
     // stair / elevator door at back
     this.dbox(c, (s0 + s1) / 2, 1.1, D - 0.05, 1.0, 2.2, 0.05, [0.7, 0.7, 0.72], 0.3, 0.3, 0.8);
+    if (ART_RESTYLE) {
+      // a residential lobby that looks lived in: reception counter, lit floor numbers over the lift, bench, planter
+      const sc = s0 + (s1 - s0) * 0.72, dc = Math.min(D * 0.45, 2.2);
+      this.dbox(c, sc, 0.55, dc, 1.8, 1.1, 0.6, [0.18, 0.12, 0.08], 0.05, 0.5);
+      this.dbox(c, sc, 1.12, dc, 1.9, 0.05, 0.7, [0.85, 0.83, 0.8], 0.1, 0.3, 0.4);
+      this.dbox(c, sc, 0.25, dc - 0.31, 1.8, 0.04, 0.02, [1.0, 0.75, 0.45], 2.2, 0.4); // warm light strip
+      this.dbox(c, (s0 + s1) / 2, 2.35, D - 0.07, 0.9, 0.16, 0.03, [1.0, 0.55, 0.25], 2.5, 0.4); // floor indicator
+      const sb = s0 + (s1 - s0) * 0.25;
+      this.dbox(c, sb, 0.23, D * 0.55, 1.4, 0.06, 0.45, [0.2, 0.2, 0.22], 0.05, 0.4, 0.6);
+      this.dbox(c, sb, 0.45, D * 0.55, 1.4, 0.08, 0.45, [0.55, 0.32, 0.2], 0.05, 0.6);
+      this.dbox(c, s1 - 0.5, 0.3, 0.7, 0.5, 0.6, 0.5, [0.15, 0.15, 0.16], 0.02, 0.6);
+      this.dbox(c, s1 - 0.5, 0.95, 0.7, 0.62, 0.75, 0.62, [0.12, 0.38, 0.2], 0.05, 0.85);
+    }
   }
 
   shutter(c) {
     const { s0, s1, ho, rng, W } = c;
     const sub = [rng.range(0, 0.4), 0, 0.6, 1];
     const open = rng.chance(0.2) ? rng.range(0.25, 0.5) : 0;
-    this.tquad(c, s0, s1, open, ho, 0.12, 'shutter', [0.85, 0.85, 0.85], 0.0, sub, 0.5);
+    const mw = ho - open; // the mural at its natural (square) proportions
+    if (!ART_RESTYLE || s1 - s0 < mw + 0.6) this.tquad(c, s0, s1, open, ho, 0.12, 'shutter', [0.85, 0.85, 0.85], 0.0, sub, 0.5);
+    else {
+      // restyle: one mural somewhere along a wide shutter, plain slats either side (the image's left strip carries only
+      // horizontal slats, so stretching it sideways is invisible) - no row of identical murals
+      const a = { aCol: [0.85, 0.85, 0.85, 0], aPbr: [0.5, 0, 1, 0] };
+      const ms = s0 + rng.range(0.3, s1 - s0 - mw - 0.3);
+      this.squad(c, ms, ms + mw, open, ho, 0.12, 'shutter', a, [0.02, 0, 0.96, 1]);
+      if (ms - s0 > 0.01) this.squad(c, s0, ms, open, ho, 0.12, 'shutter', a, [0.004, 0, 0.05, 1]);
+      if (s1 - ms - mw > 0.01) this.squad(c, ms + mw, s1, open, ho, 0.12, 'shutter', a, [0.004, 0, 0.05, 1]);
+    }
     // shutter box & guide rails
     this.dbox(c, W / 2, ho + 0.15, -0.0, s1 - s0, 0.3, 0.3, [0.45, 0.45, 0.43], 0, 0.5, 0.4, 0.8);
     this.dbox(c, s0 + 0.02, ho / 2, 0.08, 0.05, ho, 0.08, [0.35, 0.35, 0.34], 0, 0.5, 0.6, 0.6);

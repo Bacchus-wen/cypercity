@@ -8,6 +8,8 @@ import { CharacterLibrary, CROWD_U } from './characters.js';
 import { TripoCharacterLibrary } from './tripoChars.js';
 import { VatOutfit, VAT_MAP } from './vat.js';
 import { Population } from './agents.js';
+import { ANIME } from '../../engine/AnimeLook.js';
+import { ContactShadows } from '../../engine/contactShadows.js';
 
 const NEAR_R = 34;        // skinned radius
 const MAX_SKINNED = 40;   // simultaneous skinned NPCs
@@ -37,6 +39,8 @@ export default {
     // population
     this.pop = new Population(ctx, lib, 20771);
     this.pop.spawn();
+    // anime look: a soft footprint under every person (and the player) - no shadow maps otherwise ground them
+    if (ANIME) this.shadows = new ContactShadows(this.group, this.pop.agents.length + 4, { shape: 'ellipse', strength: 0.72, name: 'crowd_contact_shadows' });
 
     // VAT far renderers per outfit
     this.vats = {};
@@ -245,6 +249,13 @@ export default {
       k++;
     }
     this.drawFar(far);
+    if (this.shadows) {
+      const S = this.shadows; S.begin();
+      for (const ag of this.pop.agents) if (ag.vis && ag.dist < 70) S.add(ag.x, ag.y, ag.z, ag.yaw, 0.85 * (ag.scale || 1), 0.62 * (ag.scale || 1));
+      const pl = ctx.api.player;
+      if (pl?.object && pl.mode === 'foot' && pl.state !== 'title') { const p = pl.object.position; S.add(p.x, ctx.api.ground?.heightAt?.(p.x, p.z) ?? p.y, p.z, 0, 0.9, 0.7); }
+      S.end();
+    }
     this.stats = { skinned: chosen.size, far: far.length };
     if (ctx.isShot && this.frame === 60) console.log(`[crowd] skinned ${chosen.size}, far ${far.length}, total ${this.pop.agents.length}`);
   },

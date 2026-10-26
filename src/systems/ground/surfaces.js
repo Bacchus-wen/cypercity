@@ -8,6 +8,7 @@ import {
 import { hexTaps, hexSample, hash21, hash23, fbm, vnoise, aaBand, aaStep, pairSampleGrad, slopeFromHeight, luma } from '../../materials/noise.js';
 import { wetLayer, rainRipples, upNormalToView } from '../../materials/wet.js';
 import { G } from './plan.js';
+import { ART_RESTYLE } from '../restyleArt.js';
 
 const B = (c) => select(c, float(1), float(0));
 
@@ -20,6 +21,9 @@ export function sidewalkMaterial(T) {
   const zc = select(z.greaterThan((zs[0] + zs[1]) / 2), float(zs[0]), select(z.greaterThan((zs[1] + zs[2]) / 2), float(zs[1]), float(zs[2])));
   const dz = z.sub(zc), adz = abs(dz);
   const onAv = B(ax.lessThan(G.avHalf + G.avSide + 0.3));
+
+  // restyle (?art=legacy keeps the pavers below): poured concrete slabs + a brick furniture band along the kerb
+  if (ART_RESTYLE) return sidewalkSlabs(m, P, x, z, ax, adz, onAv);
 
   // --- shuffled pavers: each world tile picks one of the 64 photoreal tiles of the 8x8 running-bond texture
   const tile = 0.3;
@@ -83,6 +87,76 @@ export function sidewalkMaterial(T) {
   const puddle = smoothstep(0.74, 0.79, level).add(jointT.mul(0.35)).min(1);
   const rip = rainRipples(P);
   const L = wetLayer({ albedo, roughness: rough, nxy, porosity, puddle, ripple: rip, filmRipple: 0.12, film: [0.3, 0.05] });
+  m.colorNode = L.albedo;
+  m.roughnessNode = clamp(L.roughness, 0.015, 1);
+  m.metalnessNode = float(0);
+  m.normalNode = upNormalToView(L.nxy);
+  return m;
+}
+
+// Restyle sidewalk: a Night City pavement read in flat anime values. Large poured slabs (1.4 m) with crisp sawn
+// joints and only a few percent of value change per slab (the photoreal 0.3 m pavers, each with its own tint, broke
+// into a blotchy mosaic under the cel bands), a 0.8 m brick band along the kerb where the lamps, hydrants and cans
+// stand, sparse gum / oil stains, grime toward the shopfronts, and the tactile pads at the crossings.
+function sidewalkSlabs(m, P, x, z, ax, adz, onAv) {
+  const AH = G.avHalf, CH = G.crHalf;
+  // (u across from the kerb, v along it) - avenue strips or cross-street arms
+  const u = mix(adz.sub(CH), ax.sub(AH), onAv), v = mix(x, z, onAv);
+  const BAND = 0.8, SL = 1.4;
+  // brick band (running bond 0.24 x 0.12, long side along the kerb)
+  const bw = vec2(v.div(0.24), u.div(0.12));
+  const brow = floor(bw.y), bcol = floor(bw.x.add(mod(brow, 2).mul(0.5)));
+  const bh = hash21(vec2(bcol, brow).add(5.1));
+  const bfx = fract(bw.x.add(mod(brow, 2).mul(0.5))).sub(0.5).mul(0.24), bfy = fract(bw.y).sub(0.5).mul(0.12);
+  const bJoint = max(aaBand(abs(bfx).sub(0.12), 0.006), aaBand(abs(bfy).sub(0.06), 0.006));
+  const brick = vec3(0.34, 0.2, 0.15).mul(mix(0.93, 1.05, bh));
+  // slabs
+  const su = u.sub(BAND).div(SL), sv = v.div(SL);
+  const sid = vec2(floor(su), floor(sv));
+  const sh = hash23(sid.add(2.7));
+  const eu = abs(fract(su).sub(0.5)).mul(SL), ev = abs(fract(sv).sub(0.5)).mul(SL); // distance from slab centre (m)
+  const sJoint = max(aaBand(eu.sub(SL / 2), 0.009), aaBand(ev.sub(SL / 2), 0.009));
+  const slab = vec3(0.47, 0.455, 0.44).mul(mix(0.96, 1.03, sh.x));
+  const inBand = step(u, BAND);
+  const edge = aaBand(u.sub(BAND), 0.018); // steel edging strip between the band and the slabs
+  let albedo = mix(slab, brick, inBand);
+  albedo = albedo.mul(mix(0.93, 1.04, fbm(P.mul(0.045).add(7.0), 2))); // very broad value drift
+  // stains: a few dark gum / oil spots, crisp-edged so they read as drawn marks, not noise
+  const st = fbm(P.mul(1.6).add(3.3), 2);
+  albedo = albedo.mul(mix(float(1), float(0.72), smoothstep(0.76, 0.785, st).mul(inBand.oneMinus())));
+  // grime toward the shopfronts (avenue) and along the slab joints
+  const front = smoothstep(AH + 3.0, G.avHalf + G.avSide, ax).mul(onAv);
+  albedo = albedo.mul(mix(1.0, 0.84, front));
+  // wall-foot shade: a drawn dark band where the paving meets the building line (the sun casts no shadow maps, so
+  // shopfronts otherwise sat on the pavement without any contact); not at corners, the alley mouth or the plaza edge
+  const AW = AH + G.avSide - 0.6, CW = CH + G.crSide - 0.6; // building lines
+  const dWall = mix(float(CW).sub(adz), float(AW).sub(ax), onAv);
+  const atCorner = mix(B(ax.lessThan(AW)), B(adz.lessThan(CW)), onAv); // the other street's crossing: no wall there
+  const AL = G.alley, PZ = G.plaza;
+  const open = max(B(x.lessThan(0).and(abs(z.sub(AL.z)).lessThan(AL.half + 0.6))).mul(onAv),
+    PZ ? B(x.lessThan(0).and(z.lessThan(PZ.z1)).and(z.greaterThan(PZ.z0))).mul(onAv) : float(0));
+  const wallK = float(1).sub(atCorner).mul(float(1).sub(open));
+  const foot = max(smoothstep(0.34, 0.26, dWall), smoothstep(1.1, 0.0, dWall).mul(0.45)).mul(wallK);
+  albedo = albedo.mul(mix(float(1), float(0.58), foot));
+  const joint = max(mix(sJoint, bJoint, inBand), edge);
+  albedo = mix(albedo, vec3(0.1, 0.095, 0.09), joint.mul(0.85));
+  albedo = mix(albedo, vec3(0.2, 0.21, 0.22), edge);
+  // tactile pads at the crossings (US truncated domes, safety yellow)
+  const dotsAv = B(ax.greaterThan(AH + 0.2).and(ax.lessThan(AH + 0.8)).and(adz.greaterThan(CH + 1.2)).and(adz.lessThan(CH + 4.8)));
+  const dotsCr = B(ax.greaterThan(AH + 1.2).and(ax.lessThan(AH + 4.8)).and(adz.greaterThan(CH + 0.2)).and(adz.lessThan(CH + 0.8)));
+  const dots = max(dotsAv, dotsCr);
+  const dl = vec2(fract(x.div(0.06)).sub(0.5), fract(z.div(0.06)).sub(0.5));
+  const dome = smoothstep(0.32, 0.26, dl.length());
+  albedo = mix(albedo, mix(vec3(0.78, 0.6, 0.08), vec3(0.95, 0.78, 0.15), dome), dots);
+  // surface: flat slabs with a hair of per-slab tilt (varied reflections), joints rougher
+  const nxy = sh.yz.sub(0.5).mul(0.012).mul(inBand.oneMinus()).add(vec2(dl.x, dl.y).mul(dome).mul(dots).mul(0.6));
+  const rough = mix(mix(float(0.82), float(0.88), inBand), float(0.95), joint);
+  const porosity = mix(float(0.6), float(0.9), joint);
+  // puddles: broad shallow dips, joints and the brick band hold water first
+  // (few, distinct puddles - a camouflage of wet and dry patches read as a low-res texture)
+  const level = fbm(P.mul(0.16).add(1.7), 3).add(sh.z.mul(0.04)).add(inBand.mul(0.02)).sub(dots.mul(0.1));
+  const puddle = smoothstep(0.8, 0.815, level).add(joint.mul(0.15)).min(1);
+  const L = wetLayer({ albedo, roughness: rough, nxy, porosity, puddle, ripple: rainRipples(P), filmRipple: 0.12, film: [0.3, 0.05] });
   m.colorNode = L.albedo;
   m.roughnessNode = clamp(L.roughness, 0.015, 1);
   m.metalnessNode = float(0);
@@ -189,12 +263,15 @@ export function plazaMaterial(T) {
   );
   const light = vec3(0.6, 0.6, 0.63).mul(mix(0.78, 1.0, h.z));
   const dark = vec3(0.14, 0.14, 0.16).mul(mix(0.85, 1.1, h2.z));
-  let albedo = mix(S.color, Gr.color, 0.5).mul(mix(light, dark, max(band.mul(0.85), ring)));
+  // (restyle: flat stone values - the photo stone + 22 % per-slab tint read as a checkerboard of blotches in cel bands)
+  let albedo = ART_RESTYLE
+    ? mix(vec3(0.6, 0.59, 0.58).mul(mix(0.96, 1.03, h.z)), vec3(0.3, 0.29, 0.31).mul(mix(0.95, 1.05, h2.z)), max(band.mul(0.9), ring))
+    : mix(S.color, Gr.color, 0.5).mul(mix(light, dark, max(band.mul(0.85), ring)));
   // slab joints (ring bands are continuous inlays, no joints)
   const e = min(min(local.x, local.x.oneMinus()), min(local.y, local.y.oneMinus())).mul(1.5);
   const joint = smoothstep(0.012, 0.005, e).mul(ring.oneMinus());
   albedo = mix(albedo, vec3(0.02, 0.02, 0.022), joint);
-  albedo = albedo.mul(mix(1.0, 0.72, smoothstep(0.6, 0.85, fbm(P.mul(0.25).add(9.0), 3))));
+  albedo = albedo.mul(mix(1.0, ART_RESTYLE ? 0.92 : 0.72, smoothstep(0.6, 0.85, fbm(P.mul(ART_RESTYLE ? 0.08 : 0.25).add(9.0), 3))));
   const height = smoothstep(0.0, 0.025, e).mul(0.004).add(h.x.mul(0.003)).add(S.h.mul(0.0015));
   const nxy = slopeFromHeight(height, P).negate().add(S.nxy.mul(0.35)).add(Gr.nxy.mul(0.25)).add(h2.xy.sub(0.5).mul(0.025));
   const rough = mix(mix(float(0.7), float(0.45), ring), float(0.9), joint);
